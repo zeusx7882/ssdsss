@@ -11,6 +11,8 @@ Aplicação web moderna, responsiva, acessível e funcional de videoconferência
 - 💬 **Chat Durante a Chamada**: Painel de chat responsivo (desktop e mobile) usando o mesmo WebSocket de sinalização, com autor, horário e estado de envio/recebimento. As mensagens **não são persistidas** no servidor.
 - ⛶ **Tela Cheia**: Botão dedicado para quem assiste abrir o vídeo remoto ou a tela compartilhada em tela cheia (Fullscreen API), com saída de tela cheia e aviso quando a API não está disponível.
 - 🔊 **Ativar Áudio**: Botão exibido automaticamente quando o navegador bloqueia a reprodução automática (autoplay) do áudio remoto.
+- 🎚️ **Dispositivos de Áudio**: Painel durante a chamada para trocar o microfone sem desconectar, testar o nível e escolher a saída quando `setSinkId()` estiver disponível.
+- 🗣️ **Quem Está Falando**: Análise local pela Web Audio API, com anel animado e texto “Falando”; nenhum áudio é gravado ou enviado para análise.
 - 👥 **Limite Estrito de 2 Participantes**: Capacidade restrita a exatamente 2 pessoas por sala; um terceiro participante é rejeitado com mensagem clara (`ROOM_FULL`).
 - ⚡ **Comunicação Direta P2P via WebRTC**: Transmissão de áudio e vídeo de baixa latência diretamente entre os dois navegadores, com sinalização em tempo real via WebSocket.
 - 🖥️ **Compartilhamento de Tela de Alta Resolução**: Captura de tela inteira/janela via `getDisplayMedia`, com substituição contínua de faixa (`replaceTrack`) e restauração automática da câmera ao encerrar o compartilhamento.
@@ -112,6 +114,7 @@ Problemas corrigidos nesta versão:
 - **Troca de faixa no compartilhamento**: o `RTCRtpSender` de vídeo é localizado mesmo sem faixa ativa, e a câmera é restaurada ao encerrar (inclusive pelo botão nativo do navegador).
 - **Constraints de áudio com fallback**: `echoCancellation`, `noiseSuppression` e `autoGainControl` são mantidos; `sampleRate`/`channelCount` têm fallback para dispositivos e navegadores que não os aceitam.
 - **Estados de conexão e ICE**: estados `connecting`, `connected`, `disconnected` e `failed` são refletidos na interface, com tentativa automática de reinício de ICE (`restartIce`) e aviso de que uma rede restrita pode exigir TURN.
+- **Reconexão de sinalização**: o WebSocket tenta reconectar até cinco vezes com espera progressiva e volta à mesma sala. “Conectado” representa o estado real do `RTCPeerConnection`, não apenas o WebSocket.
 
 ---
 
@@ -159,6 +162,22 @@ Problemas corrigidos nesta versão:
 - Quando o outro participante compartilha a tela, o card remoto recebe destaque visual e o selo **Compartilhando tela**. Esse aviso trafega por um `RTCDataChannel` de metadados (`meta`), sem novos tipos de mensagem no servidor de sinalização.
 - O preview local passa a mostrar a tela compartilhada, e a câmera é restaurada automaticamente ao encerrar — inclusive quando o usuário clica em **Parar compartilhamento** no seletor nativo do navegador.
 - O microfone continua ativo durante o compartilhamento. Se o navegador permitir compartilhar o áudio do sistema, ele é **mixado** com o microfone via Web Audio API; se a mixagem não for possível, apenas o microfone é enviado.
+
+### Compatibilidade em navegadores móveis
+
+- O layout usa altura dinâmica (`dvh`), área segura do aparelho e painéis sobrepostos para não esconder o palco nem gerar rolagem horizontal.
+- Safari/iOS pode abrir apenas o próprio elemento `<video>` no reprodutor nativo; a aplicação usa esse fallback quando o contêiner não aceita Fullscreen API.
+- `getDisplayMedia()` não existe ou é limitado em vários navegadores móveis, especialmente Safari/iOS. Nesses casos o botão informa a limitação; assistir à tela de outra pessoa continua funcionando.
+- Captura de áudio do sistema depende do navegador, sistema e superfície escolhida. Chrome/Edge desktop costumam permitir áudio de uma aba; Firefox, Safari e celulares podem fornecer somente vídeo. O microfone permanece ativo.
+
+---
+
+## 🎚️ Configurações e indicador de fala
+
+- Abra **Configurar** durante a chamada para listar entradas e saídas. Os rótulos completos só aparecem depois da permissão de mídia, conforme a política de privacidade do navegador.
+- A troca de microfone usa `getUserMedia()` com o `deviceId` escolhido e `RTCRtpSender.replaceTrack()`, preservando o estado mutado sem renegociar ou encerrar a chamada.
+- A seleção de saída usa `HTMLMediaElement.setSinkId()`. Ela é suportada principalmente por Chrome/Edge desktop e alguns navegadores Chromium. Quando indisponível, escolha a saída nas configurações do navegador ou sistema operacional; a interface explica isso claramente.
+- O medidor e o indicador de fala usam `AnalyserNode` localmente, com limiar e atraso para evitar piscar. O processamento para ao sair da chamada e não grava nem persiste áudio.
 
 ### Limitações de Autoplay
 

@@ -54,6 +54,18 @@ describe('VideoConfUtils - Utilitários do Cliente', () => {
     assert.equal(fallback.channelCount, undefined);
   });
 
+  it('buildAudioConstraints deve preservar processamento e selecionar o microfone com exact', () => {
+    const selected = VideoConfUtils.buildAudioConstraints('device-123');
+    assert.deepEqual(selected.deviceId, { exact: 'device-123' });
+    assert.equal(selected.echoCancellation, true);
+    assert.equal(selected.noiseSuppression, true);
+    assert.equal(VideoConfUtils.buildAudioConstraints('').deviceId, undefined);
+
+    const fallback = VideoConfUtils.buildAudioConstraints('device-456', true);
+    assert.deepEqual(fallback.deviceId, { exact: 'device-456' });
+    assert.equal(fallback.sampleRate, undefined);
+  });
+
   it('sanitizeUserName deve validar, limpar e limitar o nome de usuário', () => {
     assert.equal(VideoConfUtils.sanitizeUserName('  Maria   Silva '), 'Maria Silva');
     assert.equal(VideoConfUtils.sanitizeUserName('<b>Ana</b>'), 'bAna/b');

@@ -41,6 +41,10 @@ describe('Servidor HTTP e Sinalização WebSocket Integrada', () => {
     assert.ok(html.includes('id="chat-form"'));
     assert.ok(html.includes('id="btn-fullscreen"'));
     assert.ok(html.includes('id="btn-enable-audio"'));
+    assert.ok(html.includes('id="settings-panel"'));
+    assert.ok(html.includes('id="audio-input-select"'));
+    assert.ok(html.includes('id="audio-output-select"'));
+    assert.ok(html.includes('id="audio-meter-fill"'));
   });
 
   it('deve enviar Permissions-Policy permitindo câmera, microfone, captura de tela e tela cheia', async () => {
@@ -79,6 +83,17 @@ describe('Servidor HTTP e Sinalização WebSocket Integrada', () => {
   it('GET /arquivo-inexistente deve retornar 404', async () => {
     const res = await fetch(`${baseUrl}/inexistente.xyz`);
     assert.equal(res.status, 404);
+  });
+
+  it('GET com escape de URL malformado deve retornar 400 sem derrubar o servidor', async () => {
+    const status = await new Promise((resolve, reject) => {
+      http.get(`${baseUrl}/%E0%A4%A`, (res) => {
+        res.resume();
+        resolve(res.statusCode);
+      }).on('error', reject);
+    });
+    assert.equal(status, 400);
+    assert.equal((await fetch(`${baseUrl}/health`)).status, 200);
   });
 
   it('deve realizar fluxo completo de sinalização WebSocket com 2 clientes e rejeição de 3º', async () => {

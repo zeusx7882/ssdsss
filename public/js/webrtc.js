@@ -14,6 +14,7 @@
   const {
     AUDIO_CONSTRAINTS,
     AUDIO_CONSTRAINTS_FALLBACK,
+    buildAudioConstraints,
     VIDEO_PROFILES,
     SCREEN_SHARE_CONSTRAINTS
   } = window.VideoConfUtils || {};
@@ -50,6 +51,8 @@
       this.makingOffer = false;
       this.ignoreOffer = false;
       this.iceRestartAttempts = 0;
+      this.audioContext = null;
+      this.levelMonitors = new Map();
 
       // Promessa resolvida quando getUserMedia() termina (com ou sem dispositivos).
       // Todos os caminhos de sinalização aguardam esta promessa antes de negociar.
@@ -107,6 +110,7 @@
         this.localStream = stream;
         this.updateLocalTrackReferences();
         this.emit('local_stream', this.localStream);
+        this.startLevelMonitor('local', this.localStream);
         return this.localStream;
       } finally {
         this.markMediaReady();
@@ -156,6 +160,23 @@
           if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
             throw err;
           }
+
+          // Sem microfone utilizável: mantém a chamada com câmera e informa a ausência de áudio.
+          for (const profile of profiles) {
+            try {
+              const videoOnly = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: profile.constraints
+              });
+              this.isAudioMuted = true;
+              return videoOnly;
+            } catch (err) {
+              lastError = err;
+              if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+                throw err;
+              }
+            }
+          }
         }
       }
 
@@ -176,7 +197,7 @@
      * Sempre cria transceivers de áudio e vídeo em modo sendrecv, mesmo quando
      * a câmera ou o microfone não estão disponíveis, evitando mídia unidirecional.
      */
-    createPeerConnection() {
+    async createPeerConnection() {
       if (this.pc) {
         this.closePeerConnection();
       }
@@ -197,7 +218,7 @@
       this.setupMetaChannel();
 
       if (this.micAudioTrack) {
-        this.audioSender.replaceTrack(this.micAudioTrack).catch(() => {});
+        await this.audioSender.replaceTrack(this.micAudioTrack);
       }
 
       const activeVideoTrack = this.isScreenSharing && this.screenStream
@@ -205,7 +226,10 @@
         : this.cameraVideoTrack;
 
       if (activeVideoTrack) {
-        this.videoSender.replaceTrack(activeVideoTrack).catch(() => {});
+        await this.videoSender.replaceTrack(activeVideoTrack);
+      }
+      if (this.isScreenSharing && this.screenStream) {
+        await this.applyScreenAudio(this.screenStream);
       }
 
       // Trata candidatos ICE gerados localmente
@@ -222,6 +246,12 @@
         if (!alreadyAdded) {
           this.remoteStream.addTrack(track);
         }
+        if (track.kind === 'audio') {
+          this.startLevelMonitor('remote', this.remoteStream);
+        }
+        const reportLiveTrack = () => this.emit('remote_track_live', track.kind);
+        track.onunmute = reportLiveTrack;
+        if (!track.muted) reportLiveTrack();
 
         track.onended = () => {
           try {
@@ -252,6 +282,68 @@
       };
 
       this.optimizeVideoQuality();
+    }
+
+    startLevelMonitor(source, stream) {
+      if (!stream || stream.getAudioTracks().length === 0) return;
+      this.stopLevelMonitor(source);
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+
+      try {
+        this.audioContext = this.audioContext || new AudioCtx();
+        this.resumeAudioAnalysis();
+        const input = this.audioContext.createMediaStreamSource(stream);
+        const analyser = this.audioContext.createAnalyser();
+        analyser.fftSize = 512;
+        analyser.smoothingTimeConstant = 0.75;
+        input.connect(analyser);
+
+        const samples = new Uint8Array(analyser.fftSize);
+        let speaking = false;
+        let quietFrames = 0;
+        const timer = setInterval(() => {
+          analyser.getByteTimeDomainData(samples);
+          let sum = 0;
+          for (const sample of samples) {
+            const normalized = (sample - 128) / 128;
+            sum += normalized * normalized;
+          }
+          const level = Math.min(1, Math.sqrt(sum / samples.length) * 4);
+          const muted = source === 'local' && this.isAudioMuted;
+          if (!muted && level > 0.12) {
+            quietFrames = 0;
+            if (!speaking) {
+              speaking = true;
+              this.emit('speaking_change', { source, speaking: true, level });
+            }
+          } else if (speaking && ++quietFrames >= 5) {
+            speaking = false;
+            quietFrames = 0;
+            this.emit('speaking_change', { source, speaking: false, level });
+          }
+          this.emit('audio_level', { source, level: muted ? 0 : level });
+        }, 100);
+
+        this.levelMonitors.set(source, { input, analyser, timer });
+      } catch (err) {
+        console.warn('Indicador de fala indisponível:', err);
+      }
+    }
+
+    resumeAudioAnalysis() {
+      if (this.audioContext && this.audioContext.state === 'suspended') {
+        this.audioContext.resume().catch(() => {});
+      }
+    }
+
+    stopLevelMonitor(source) {
+      const monitor = this.levelMonitors.get(source);
+      if (!monitor) return;
+      clearInterval(monitor.timer);
+      monitor.input.disconnect();
+      this.levelMonitors.delete(source);
+      this.emit('speaking_change', { source, speaking: false, level: 0 });
     }
 
     /**
@@ -344,9 +436,14 @@
     setupSignalingListeners() {
       // Quando outro participante entra na sala e somos o iniciador
       this.signaling.on('peer_joined', async () => {
-        await this.mediaReady;
-        this.createPeerConnection();
-        await this.createAndSendOffer();
+        try {
+          await this.mediaReady;
+          await this.createPeerConnection();
+          await this.createAndSendOffer();
+        } catch (err) {
+          console.error('Falha ao iniciar conexão WebRTC:', err);
+          this.emit('error', { code: 'PEER_SETUP_ERROR', message: 'Não foi possível preparar a mídia da chamada.' });
+        }
       });
 
       // Quando recebemos uma oferta SDP
@@ -398,22 +495,20 @@
     async handleOffer(sdp) {
       if (!sdp) return;
 
-      if (!this.pc) {
-        this.createPeerConnection();
-      }
-
-      const offerCollision = this.makingOffer || this.pc.signalingState !== 'stable';
-      this.ignoreOffer = !this.isPolite && offerCollision;
-      if (this.ignoreOffer) {
-        return;
-      }
-
       try {
+        if (!this.pc) {
+          await this.createPeerConnection();
+        }
+
+        const offerCollision = this.makingOffer || this.pc.signalingState !== 'stable';
+        this.ignoreOffer = !this.isPolite && offerCollision;
+        if (this.ignoreOffer) return;
+
         if (this.pc.signalingState === 'have-local-offer') {
           await this.pc.setLocalDescription({ type: 'rollback' });
         }
 
-        await this.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        await this.pc.setRemoteDescription(sdp);
         await this.processPendingCandidates();
 
         const answer = await this.pc.createAnswer();
@@ -431,7 +526,7 @@
         return;
       }
       try {
-        await this.pc.setRemoteDescription(new RTCSessionDescription(sdp));
+        await this.pc.setRemoteDescription(sdp);
         await this.processPendingCandidates();
       } catch (err) {
         console.error('Erro ao definir descrição remota da resposta:', err);
@@ -442,6 +537,9 @@
       if (!candidate) return;
 
       if (!this.pc || !this.pc.remoteDescription) {
+        if (this.pendingCandidates.length >= 100) {
+          this.pendingCandidates.shift();
+        }
         this.pendingCandidates.push(candidate);
         return;
       }
@@ -472,6 +570,7 @@
         this.remoteStream = null;
       }
       this.closePeerConnection();
+      this.stopLevelMonitor('remote');
       this.emit('peer_left');
     }
 
@@ -488,6 +587,48 @@
         track.enabled = !this.isAudioMuted;
       }
       return this.isAudioMuted;
+    }
+
+    async replaceMicrophone(deviceId) {
+      const preferred = buildAudioConstraints
+        ? buildAudioConstraints(deviceId)
+        : { ...(AUDIO_CONSTRAINTS || true), deviceId: { exact: deviceId } };
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: preferred, video: false });
+      } catch (err) {
+        if (!buildAudioConstraints) throw err;
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: buildAudioConstraints(deviceId, true),
+          video: false
+        });
+      }
+
+      const newTrack = stream.getAudioTracks()[0];
+      if (!newTrack) throw new Error('O microfone selecionado não forneceu áudio.');
+      newTrack.enabled = !this.isAudioMuted;
+
+      if (this.audioMixer) {
+        await this.restoreMicrophoneAudio();
+      }
+      if (this.audioSender) {
+        await this.audioSender.replaceTrack(newTrack);
+      }
+
+      const oldTrack = this.micAudioTrack;
+      this.micAudioTrack = newTrack;
+      if (!this.localStream) this.localStream = new MediaStream();
+      if (oldTrack) {
+        this.localStream.removeTrack(oldTrack);
+        oldTrack.stop();
+      }
+      this.localStream.addTrack(newTrack);
+      if (this.isScreenSharing && this.screenStream) {
+        await this.applyScreenAudio(this.screenStream);
+      }
+      this.startLevelMonitor('local', this.localStream);
+      this.emit('local_stream', this.localStream);
+      return newTrack;
     }
 
     /**
@@ -598,6 +739,11 @@
       if (!AudioCtx || !this.audioSender) return;
 
       try {
+        if (this.audioMixer) {
+          this.audioMixer.mixedTrack.stop();
+          await this.audioMixer.context.close().catch(() => {});
+          this.audioMixer = null;
+        }
         const context = new AudioCtx();
         const destination = context.createMediaStreamDestination();
         context.createMediaStreamSource(new MediaStream([this.micAudioTrack])).connect(destination);
@@ -660,6 +806,11 @@
     }
 
     closePeerConnection() {
+      if (this.audioMixer) {
+        this.audioMixer.mixedTrack.stop();
+        this.audioMixer.context.close().catch(() => {});
+        this.audioMixer = null;
+      }
       if (this.pc) {
         this.pc.ontrack = null;
         this.pc.onicecandidate = null;
@@ -669,6 +820,7 @@
         this.pc = null;
       }
       if (this.metaChannel) {
+        this.metaChannel.onclose = null;
         this.metaChannel.onopen = null;
         this.metaChannel.onmessage = null;
         try {
@@ -694,6 +846,14 @@
       if (this.remoteStream) {
         this.remoteStream.getTracks().forEach((t) => t.stop());
         this.remoteStream = null;
+      }
+
+      for (const source of [...this.levelMonitors.keys()]) {
+        this.stopLevelMonitor(source);
+      }
+      if (this.audioContext) {
+        await this.audioContext.close().catch(() => {});
+        this.audioContext = null;
       }
 
       this.cameraVideoTrack = null;

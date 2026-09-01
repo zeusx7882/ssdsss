@@ -45,6 +45,7 @@
   const btnToggleCam = document.getElementById('btn-toggle-cam');
   const btnToggleScreen = document.getElementById('btn-toggle-screen');
   const btnToggleChat = document.getElementById('btn-toggle-chat');
+  const btnToggleSettings = document.getElementById('btn-toggle-settings');
   const btnEndCall = document.getElementById('btn-end-call');
   const screenBtnText = document.getElementById('screen-btn-text');
   const btnEnableAudio = document.getElementById('btn-enable-audio');
@@ -59,6 +60,16 @@
   const chatInput = document.getElementById('chat-input');
   const btnCloseChat = document.getElementById('btn-close-chat');
   const chatUnreadBadge = document.getElementById('chat-unread-badge');
+
+  // Configurações de dispositivos
+  const settingsPanel = document.getElementById('settings-panel');
+  const btnCloseSettings = document.getElementById('btn-close-settings');
+  const btnRefreshDevices = document.getElementById('btn-refresh-devices');
+  const audioInputSelect = document.getElementById('audio-input-select');
+  const audioOutputSelect = document.getElementById('audio-output-select');
+  const audioOutputHelp = document.getElementById('audio-output-help');
+  const microphoneStatus = document.getElementById('microphone-status');
+  const audioMeterFill = document.getElementById('audio-meter-fill');
 
   // Toasts e Modais
   const toastContainer = document.getElementById('toast-container');
@@ -79,6 +90,8 @@
   let chatMessageCounter = 0;
   const pendingChatMessages = new Map();
   const MAX_CHAT_HISTORY = 200;
+  let nativeVideoFullscreen = false;
+  let isSwitchingMicrophone = false;
 
   /**
    * Exibe mensagens de notificação Toast temporárias
@@ -213,7 +226,12 @@
     setRemoteName(null);
     setRemoteScreenshare(false);
     closeChat();
+    closeSettings();
     clearChat();
+    chatMessageCounter = 0;
+    localVideoCard.classList.remove('is-speaking');
+    remoteVideoCard.classList.remove('is-speaking');
+    audioMeterFill.style.width = '0%';
     hideEnableAudioButton();
 
     // Reseta estado dos botões
@@ -256,6 +274,7 @@
   }
 
   async function playRemoteVideo() {
+    if (webrtc) webrtc.resumeAudioAnalysis();
     remoteVideo.muted = false;
     remoteVideo.volume = 1;
     try {
@@ -297,6 +316,10 @@
   }
 
   function exitFullscreen() {
+    if (nativeVideoFullscreen && remoteVideo.webkitExitFullscreen) {
+      remoteVideo.webkitExitFullscreen();
+      return;
+    }
     if (!getFullscreenElement()) return;
     if (document.exitFullscreen) {
       document.exitFullscreen().catch(() => {});
@@ -306,7 +329,7 @@
   }
 
   function updateFullscreenButtonState() {
-    const isFullscreen = !!getFullscreenElement();
+    const isFullscreen = !!getFullscreenElement() || nativeVideoFullscreen;
     btnFullscreen.setAttribute('aria-pressed', isFullscreen ? 'true' : 'false');
     btnFullscreen.setAttribute(
       'aria-label',
@@ -320,7 +343,7 @@
   }
 
   btnFullscreen.addEventListener('click', async () => {
-    if (getFullscreenElement()) {
+    if (getFullscreenElement() || nativeVideoFullscreen) {
       exitFullscreen();
       return;
     }
@@ -350,6 +373,14 @@
 
   document.addEventListener('fullscreenchange', updateFullscreenButtonState);
   document.addEventListener('webkitfullscreenchange', updateFullscreenButtonState);
+  remoteVideo.addEventListener('webkitbeginfullscreen', () => {
+    nativeVideoFullscreen = true;
+    updateFullscreenButtonState();
+  });
+  remoteVideo.addEventListener('webkitendfullscreen', () => {
+    nativeVideoFullscreen = false;
+    updateFullscreenButtonState();
+  });
 
   /* ==========================================================================
      Destaque do compartilhamento de tela remoto
@@ -374,6 +405,7 @@
   }
 
   function openChat() {
+    closeSettings();
     chatPanel.hidden = false;
     btnToggleChat.setAttribute('aria-pressed', 'true');
     btnToggleChat.setAttribute('aria-expanded', 'true');
@@ -392,6 +424,102 @@
     btnToggleChat.setAttribute('aria-label', 'Abrir chat');
     btnToggleChat.classList.remove('active');
   }
+
+  function openSettings() {
+    closeChat();
+    settingsPanel.hidden = false;
+    btnToggleSettings.setAttribute('aria-pressed', 'true');
+    btnToggleSettings.setAttribute('aria-expanded', 'true');
+    btnToggleSettings.classList.add('active');
+    refreshAudioDevices();
+  }
+
+  function closeSettings() {
+    settingsPanel.hidden = true;
+    btnToggleSettings.setAttribute('aria-pressed', 'false');
+    btnToggleSettings.setAttribute('aria-expanded', 'false');
+    btnToggleSettings.classList.remove('active');
+  }
+
+  async function refreshAudioDevices() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+      audioInputSelect.replaceChildren(new Option('Listagem indisponível', ''));
+      audioOutputSelect.replaceChildren(new Option('Seleção indisponível', ''));
+      return;
+    }
+
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const selectedInput = webrtc && webrtc.micAudioTrack
+        ? webrtc.micAudioTrack.getSettings().deviceId
+        : audioInputSelect.value;
+      const selectedOutput = audioOutputSelect.value;
+      const inputs = devices.filter((device) => device.kind === 'audioinput');
+      const outputs = devices.filter((device) => device.kind === 'audiooutput');
+
+      audioInputSelect.replaceChildren(...inputs.map((device, index) =>
+        new Option(device.label || `Microfone ${index + 1}`, device.deviceId)
+      ));
+      if (selectedInput) audioInputSelect.value = selectedInput;
+
+      if (typeof remoteVideo.setSinkId === 'function') {
+        audioOutputSelect.disabled = false;
+        audioOutputSelect.replaceChildren(
+          new Option('Padrão do sistema', ''),
+          ...outputs.map((device, index) =>
+            new Option(device.label || `Saída ${index + 1}`, device.deviceId)
+          )
+        );
+        if (selectedOutput) audioOutputSelect.value = selectedOutput;
+        audioOutputHelp.textContent = 'A saída é aplicada ao áudio do participante remoto.';
+      } else {
+        audioOutputSelect.disabled = true;
+        audioOutputSelect.replaceChildren(new Option('Controlada pelo navegador/sistema', ''));
+        audioOutputHelp.textContent = 'Este navegador não permite escolher a saída de áudio pela página.';
+      }
+    } catch (err) {
+      console.warn('Não foi possível listar dispositivos:', err);
+      showToast('Não foi possível atualizar a lista de dispositivos.', 'warning');
+    }
+  }
+
+  btnToggleSettings.addEventListener('click', () => {
+    if (settingsPanel.hidden) openSettings();
+    else closeSettings();
+  });
+  btnCloseSettings.addEventListener('click', closeSettings);
+  btnRefreshDevices.addEventListener('click', refreshAudioDevices);
+
+  audioInputSelect.addEventListener('change', async () => {
+    if (!webrtc || !audioInputSelect.value) return;
+    isSwitchingMicrophone = true;
+    audioInputSelect.disabled = true;
+    microphoneStatus.textContent = 'Trocando microfone...';
+    try {
+      await webrtc.replaceMicrophone(audioInputSelect.value);
+      microphoneStatus.textContent = 'Microfone alterado sem encerrar a chamada.';
+      showToast('Microfone alterado.', 'success');
+    } catch (err) {
+      console.error('Falha ao trocar microfone:', err);
+      microphoneStatus.textContent = 'Não foi possível usar este microfone.';
+      showToast('Falha ao trocar o microfone. Verifique a permissão.', 'error');
+      await refreshAudioDevices();
+    } finally {
+      isSwitchingMicrophone = false;
+      audioInputSelect.disabled = false;
+    }
+  });
+
+  audioOutputSelect.addEventListener('change', async () => {
+    if (typeof remoteVideo.setSinkId !== 'function') return;
+    try {
+      await remoteVideo.setSinkId(audioOutputSelect.value);
+      showToast('Saída de áudio alterada.', 'success');
+    } catch (err) {
+      console.error('Falha ao trocar saída de áudio:', err);
+      showToast('O navegador não autorizou esta saída de áudio.', 'error');
+    }
+  });
 
   function updateUnreadBadge() {
     if (unreadMessages > 0) {
@@ -594,6 +722,25 @@
       setupAppWebRTCEvents();
 
       await signaling.connect();
+      try {
+        await webrtc.initLocalMedia();
+        if (!webrtc.hasCamera) {
+          localPlaceholder.style.display = 'flex';
+          showToast('Câmera indisponível. A chamada continuará somente com áudio.', 'warning');
+        }
+        await refreshAudioDevices();
+      } catch (mediaErr) {
+        console.error('Erro ao acessar mídia:', mediaErr);
+        if (mediaErr.name === 'NotAllowedError' || mediaErr.name === 'PermissionDeniedError') {
+          showToast('Permissão de câmera/microfone negada. A chamada continuará sem mídia local.', 'error', 7000);
+        } else if (mediaErr.name === 'NotFoundError' || mediaErr.name === 'DevicesNotFoundError') {
+          showToast('Nenhum dispositivo de vídeo/áudio encontrado.', 'warning');
+        } else if (mediaErr.name === 'NotReadableError') {
+          showToast('A câmera ou o microfone já estão sendo usados por outro aplicativo.', 'error');
+        } else {
+          showToast('Não foi possível iniciar a mídia local. Verifique os dispositivos.', 'warning');
+        }
+      }
       signaling.join(roomVal, passwordVal, userNameVal);
     } catch (err) {
       console.error('Erro na conexão:', err);
@@ -624,29 +771,6 @@
         showToast('Conectando ao participante da sala...', 'info');
       }
 
-      // Inicializa mídia local (câmera e microfone com alta qualidade).
-      // A negociação WebRTC só acontece depois que esta etapa termina.
-      try {
-        await webrtc.initLocalMedia();
-        if (!webrtc.hasCamera) {
-          localPlaceholder.style.display = 'flex';
-          showToast('Câmera indisponível. A chamada continuará somente com áudio.', 'warning');
-        }
-      } catch (mediaErr) {
-        console.error('Erro ao acessar mídia:', mediaErr);
-        if (mediaErr.name === 'NotAllowedError' || mediaErr.name === 'PermissionDeniedError') {
-          showErrorModal(
-            'Permissão Negada',
-            'O acesso à câmera e ao microfone foi negado. Por favor, permita o acesso nas configurações do navegador para participar da chamada.'
-          );
-        } else if (mediaErr.name === 'NotFoundError' || mediaErr.name === 'DevicesNotFoundError') {
-          showToast('Nenhum dispositivo de vídeo/áudio encontrado.', 'warning');
-        } else if (mediaErr.name === 'NotReadableError') {
-          showToast('A câmera ou o microfone já estão sendo usados por outro aplicativo.', 'error');
-        } else {
-          showToast('Aviso: Não foi possível capturar câmera em alta resolução.', 'warning');
-        }
-      }
     });
 
     signaling.on('peer_joined', (msg) => {
@@ -726,14 +850,33 @@
 
     signaling.on('disconnected', () => {
       if (!signaling || !signaling.isExplicitlyClosed) {
+        if (webrtc) webrtc.closePeerConnection();
+        remoteVideo.srcObject = null;
+        remotePlaceholder.style.display = 'flex';
+        remotePlaceholderText.textContent = 'Reconectando a sinalização...';
         updateConnectionStatus('Conexão perdida', 'status-reconnecting');
-        showToast('Conexão com o servidor perdida. Atualize a página para reconectar.', 'error', 8000);
+        showToast('Conexão com o servidor perdida. Tentando reconectar...', 'warning', 5000);
       }
+    });
+
+    signaling.on('reconnecting', ({ attempt, maxAttempts }) => {
+      updateConnectionStatus(`Reconectando ${attempt}/${maxAttempts}`, 'status-reconnecting');
+    });
+
+    signaling.on('reconnected', () => {
+      updateConnectionStatus('Sinalização restaurada', 'status-waiting');
+      showToast('Conexão com o servidor restaurada.', 'success');
+    });
+
+    signaling.on('reconnect_failed', () => {
+      updateConnectionStatus('Servidor indisponível', 'status-reconnecting');
+      showToast('Não foi possível reconectar. Atualize a página para tentar novamente.', 'error', 8000);
     });
   }
 
   function setupAppWebRTCEvents() {
     webrtc.on('local_stream', (stream) => {
+      if (webrtc.isScreenSharing) return;
       localVideo.srcObject = stream;
       localVideo.play().catch(() => {});
     });
@@ -742,9 +885,16 @@
       if (remoteVideo.srcObject !== stream) {
         remoteVideo.srcObject = stream;
       }
-      remotePlaceholder.style.display = 'none';
-      updateConnectionStatus('Conectado', 'status-connected');
       playRemoteVideo();
+    });
+
+    webrtc.on('remote_track_live', (kind) => {
+      if (kind === 'video') {
+        remotePlaceholder.style.display = 'none';
+      } else if (!webrtc.remoteStream || webrtc.remoteStream.getVideoTracks().length === 0) {
+        remotePlaceholder.style.display = 'flex';
+        remotePlaceholderText.textContent = 'Áudio conectado. A câmera remota está indisponível.';
+      }
     });
 
     webrtc.on('remote_screenshare', (isSharing) => {
@@ -754,14 +904,37 @@
     webrtc.on('connection_state_change', (state) => {
       if (state === 'connected') {
         updateConnectionStatus('Conectado', 'status-connected');
-        remotePlaceholder.style.display = 'none';
+        if (!webrtc.remoteStream || webrtc.remoteStream.getTracks().length === 0) {
+          remotePlaceholder.style.display = 'flex';
+          remotePlaceholderText.textContent = 'Conectado, aguardando mídia remota...';
+        }
       } else if (state === 'connecting' || state === 'new') {
         updateConnectionStatus('Estabelecendo conexão...', 'status-waiting');
       } else if (state === 'disconnected') {
         updateConnectionStatus('Reconectando...', 'status-reconnecting');
       } else if (state === 'failed') {
         updateConnectionStatus('Falha na conexão', 'status-reconnecting');
+      } else if (state === 'closed') {
+        updateConnectionStatus('Chamada encerrada', 'status-reconnecting');
       }
+    });
+
+    webrtc.on('speaking_change', ({ source, speaking }) => {
+      const card = source === 'local' ? localVideoCard : remoteVideoCard;
+      card.classList.toggle('is-speaking', speaking);
+      const label = source === 'local' ? localNameLabel : remoteNameLabel;
+      label.setAttribute('aria-label', speaking
+        ? `${label.textContent}, falando agora`
+        : label.textContent);
+    });
+
+    webrtc.on('audio_level', ({ source, level }) => {
+      if (source !== 'local') return;
+      audioMeterFill.style.width = `${Math.round(level * 100)}%`;
+      if (isSwitchingMicrophone) return;
+      microphoneStatus.textContent = level > 0.12
+        ? 'Microfone funcionando — você está falando.'
+        : 'Fale para testar o nível do microfone.';
     });
 
     webrtc.on('error', (err) => {
@@ -842,7 +1015,7 @@
       btnToggleCam.title = 'Câmera (Desativada)';
       iconOn.style.display = 'none';
       iconOff.style.display = '';
-      localPlaceholder.style.display = 'flex';
+      localPlaceholder.style.display = webrtc.isScreenSharing ? 'none' : 'flex';
       showToast('Câmera desativada.', 'info', 2000);
     } else {
       btnToggleCam.classList.remove('is-off');
@@ -888,6 +1061,12 @@
       signaling.leave();
     }
   });
+
+  if (navigator.mediaDevices && navigator.mediaDevices.addEventListener) {
+    navigator.mediaDevices.addEventListener('devicechange', () => {
+      if (webrtc) refreshAudioDevices();
+    });
+  }
 
   updateFullscreenButtonState();
 })();

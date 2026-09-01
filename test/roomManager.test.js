@@ -434,6 +434,18 @@ describe('RoomManager - Validação de Tipos e Tamanhos de Mensagem', () => {
     }));
     assert.equal(ws1.getLastMessage().code, 'INVALID_SDP');
     assert.ok(!ws2.getSentMessages().some((m) => m.type === 'offer'));
+
+    manager.handleMessage(ws1, JSON.stringify({
+      type: 'offer',
+      sdp: { type: 'answer', sdp: 'v=0' }
+    }));
+    assert.equal(ws1.getLastMessage().code, 'INVALID_SDP');
+
+    manager.handleMessage(ws1, JSON.stringify({
+      type: 'answer',
+      sdp: { type: 'answer', sdp: '' }
+    }));
+    assert.equal(ws1.getLastMessage().code, 'INVALID_SDP');
   });
 
   it('deve rejeitar candidatos ICE inválidos e normalizar os válidos', () => {
