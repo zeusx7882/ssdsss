@@ -409,7 +409,7 @@
       }
 
       try {
-        if (offerCollision && typeof this.pc.setLocalDescription === 'function') {
+        if (this.pc.signalingState === 'have-local-offer') {
           await this.pc.setLocalDescription({ type: 'rollback' });
         }
 
