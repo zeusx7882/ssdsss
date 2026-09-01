@@ -32,6 +32,11 @@ function requestHandler(req, res) {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  // Permite explicitamente câmera, microfone, captura de tela e tela cheia na própria origem
+  res.setHeader(
+    'Permissions-Policy',
+    'camera=(self), microphone=(self), display-capture=(self), fullscreen=(self)'
+  );
   res.setHeader(
     'Content-Security-Policy',
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; connect-src 'self' ws: wss:; img-src 'self' data:;"
@@ -81,7 +86,7 @@ function requestHandler(req, res) {
 const server = http.createServer(requestHandler);
 
 // Servidor WebSocket para sinalização WebRTC
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64 * 1024 });
 
 wss.on('connection', (ws) => {
   ws.isAlive = true;

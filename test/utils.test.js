@@ -44,4 +44,44 @@ describe('VideoConfUtils - Utilitários do Cliente', () => {
     assert.equal(VideoConfUtils.SCREEN_SHARE_CONSTRAINTS.video.width.ideal, 1920);
     assert.equal(VideoConfUtils.SCREEN_SHARE_CONSTRAINTS.video.height.ideal, 1080);
   });
+
+  it('AUDIO_CONSTRAINTS_FALLBACK deve manter apenas as restrições compatíveis', () => {
+    const fallback = VideoConfUtils.AUDIO_CONSTRAINTS_FALLBACK;
+    assert.equal(fallback.echoCancellation, true);
+    assert.equal(fallback.noiseSuppression, true);
+    assert.equal(fallback.autoGainControl, true);
+    assert.equal(fallback.sampleRate, undefined);
+    assert.equal(fallback.channelCount, undefined);
+  });
+
+  it('sanitizeUserName deve validar, limpar e limitar o nome de usuário', () => {
+    assert.equal(VideoConfUtils.sanitizeUserName('  Maria   Silva '), 'Maria Silva');
+    assert.equal(VideoConfUtils.sanitizeUserName('<b>Ana</b>'), 'bAna/b');
+    assert.equal(
+      VideoConfUtils.sanitizeUserName('a'.repeat(80)).length,
+      VideoConfUtils.MAX_USER_NAME_LENGTH
+    );
+    assert.equal(VideoConfUtils.sanitizeUserName('   '), null);
+    assert.equal(VideoConfUtils.sanitizeUserName(null), null);
+    assert.equal(VideoConfUtils.sanitizeUserName(123), null);
+  });
+
+  it('sanitizeChatText deve limitar o tamanho e rejeitar mensagens vazias', () => {
+    assert.equal(VideoConfUtils.sanitizeChatText('  olá  '), 'olá');
+    assert.equal(
+      VideoConfUtils.sanitizeChatText('x'.repeat(1000)).length,
+      VideoConfUtils.MAX_CHAT_LENGTH
+    );
+    assert.equal(VideoConfUtils.sanitizeChatText('   '), null);
+    assert.equal(VideoConfUtils.sanitizeChatText(undefined), null);
+  });
+
+  it('formatClockTime deve formatar o horário como HH:MM', () => {
+    const date = new Date(2024, 0, 1, 9, 5, 0);
+    assert.equal(VideoConfUtils.formatClockTime(date.getTime()), '09:05');
+  });
+
+  it('isFullscreenSupported deve retornar false sem document disponível', () => {
+    assert.equal(VideoConfUtils.isFullscreenSupported(), false);
+  });
 });

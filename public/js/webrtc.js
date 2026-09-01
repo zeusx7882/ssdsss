@@ -1,12 +1,22 @@
 /**
  * Gerenciador WebRTC para chamada P2P com suporte a alta qualidade,
  * fallback progressivo de resolução e compartilhamento de tela com troca dinâmica de faixa.
+ *
+ * Pontos importantes:
+ * - A negociação SDP só ocorre depois que a mídia local está pronta (mediaReady).
+ * - Apenas uma MediaStream remota é usada, sem duplicação de faixas.
+ * - Transceivers de áudio e vídeo são sempre criados, mesmo sem câmera disponível.
  */
 
 (function (window) {
   'use strict';
 
-  const { AUDIO_CONSTRAINTS, VIDEO_PROFILES, SCREEN_SHARE_CONSTRAINTS } = window.VideoConfUtils || {};
+  const {
+    AUDIO_CONSTRAINTS,
+    AUDIO_CONSTRAINTS_FALLBACK,
+    VIDEO_PROFILES,
+    SCREEN_SHARE_CONSTRAINTS
+  } = window.VideoConfUtils || {};
 
   const RTC_CONFIG = {
     iceServers: [
@@ -23,13 +33,29 @@
       this.pc = null;
       this.localStream = null;
       this.cameraVideoTrack = null;
+      this.micAudioTrack = null;
       this.screenStream = null;
       this.remoteStream = null;
+      this.audioSender = null;
+      this.videoSender = null;
+      this.audioMixer = null;
+      this.metaChannel = null;
       this.isScreenSharing = false;
       this.isAudioMuted = false;
       this.isVideoMuted = false;
+      this.hasCamera = false;
       this.pendingCandidates = [];
       this.listeners = new Map();
+      this.isPolite = false;
+      this.makingOffer = false;
+      this.ignoreOffer = false;
+      this.iceRestartAttempts = 0;
+
+      // Promessa resolvida quando getUserMedia() termina (com ou sem dispositivos).
+      // Todos os caminhos de sinalização aguardam esta promessa antes de negociar.
+      this.mediaReady = new Promise((resolve) => {
+        this.resolveMediaReady = resolve;
+      });
 
       this.setupSignalingListeners();
     }
@@ -53,9 +79,41 @@
     }
 
     /**
-     * Tenta obter mídia local (câmera e microfone) com fallback progressivo
+     * Define se este par é o "polite peer" (quem cede em caso de colisão de ofertas).
+     * O participante que entrou depois (não iniciador) é o polite.
+     */
+    setPolite(isPolite) {
+      this.isPolite = !!isPolite;
+    }
+
+    /**
+     * Marca a mídia local como pronta, liberando a negociação.
+     */
+    markMediaReady() {
+      if (this.resolveMediaReady) {
+        this.resolveMediaReady();
+        this.resolveMediaReady = null;
+      }
+    }
+
+    /**
+     * Tenta obter mídia local (câmera e microfone) com fallback progressivo.
+     * A promessa mediaReady é sempre resolvida ao final, mesmo em caso de falha,
+     * para que a sinalização não fique bloqueada indefinidamente.
      */
     async initLocalMedia() {
+      try {
+        const stream = await this.requestUserMedia();
+        this.localStream = stream;
+        this.updateLocalTrackReferences();
+        this.emit('local_stream', this.localStream);
+        return this.localStream;
+      } finally {
+        this.markMediaReady();
+      }
+    }
+
+    async requestUserMedia() {
       let lastError = null;
 
       const profiles = VIDEO_PROFILES || [
@@ -64,48 +122,59 @@
         { name: 'Básico', constraints: true }
       ];
 
+      const audioProfiles = [
+        AUDIO_CONSTRAINTS || true,
+        AUDIO_CONSTRAINTS_FALLBACK || true,
+        true
+      ];
+
       for (const profile of profiles) {
-        try {
-          const constraints = {
-            audio: AUDIO_CONSTRAINTS || true,
-            video: profile.constraints
-          };
-
-          this.localStream = await navigator.mediaDevices.getUserMedia(constraints);
-          const videoTracks = this.localStream.getVideoTracks();
-          if (videoTracks.length > 0) {
-            this.cameraVideoTrack = videoTracks[0];
+        for (const audio of audioProfiles) {
+          try {
+            return await navigator.mediaDevices.getUserMedia({
+              audio,
+              video: profile.constraints
+            });
+          } catch (err) {
+            lastError = err;
+            if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+              throw err;
+            }
+            console.warn(`Perfil de mídia '${profile.name}' não suportado, tentando fallback...`, err.name);
           }
-
-          this.emit('local_stream', this.localStream);
-          return this.localStream;
-        } catch (err) {
-          lastError = err;
-          // Se o erro for de permissão negada (NotAllowedError / PermissionDeniedError),
-          // não adianta tentar outros perfis de resolução
-          if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-            throw err;
-          }
-          console.warn(`Perfil de vídeo '${profile.name}' não suportado, tentando fallback...`, err);
         }
       }
 
-      // Se falhar em todos os perfis com vídeo, tenta apenas áudio como último recurso
-      try {
-        this.localStream = await navigator.mediaDevices.getUserMedia({
-          audio: AUDIO_CONSTRAINTS || true,
-          video: false
-        });
-        this.isVideoMuted = true;
-        this.emit('local_stream', this.localStream);
-        return this.localStream;
-      } catch (err) {
-        throw lastError || err;
+      // Sem câmera utilizável: tenta apenas áudio para manter a voz funcionando
+      for (const audio of audioProfiles) {
+        try {
+          const audioOnly = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+          this.isVideoMuted = true;
+          return audioOnly;
+        } catch (err) {
+          lastError = err;
+          if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+            throw err;
+          }
+        }
       }
+
+      throw lastError || new Error('Nenhum dispositivo de mídia disponível.');
+    }
+
+    updateLocalTrackReferences() {
+      if (!this.localStream) return;
+      const videoTracks = this.localStream.getVideoTracks();
+      const audioTracks = this.localStream.getAudioTracks();
+      this.cameraVideoTrack = videoTracks.length > 0 ? videoTracks[0] : null;
+      this.micAudioTrack = audioTracks.length > 0 ? audioTracks[0] : null;
+      this.hasCamera = !!this.cameraVideoTrack;
     }
 
     /**
-     * Cria e configura a instância do RTCPeerConnection
+     * Cria e configura a instância do RTCPeerConnection.
+     * Sempre cria transceivers de áudio e vídeo em modo sendrecv, mesmo quando
+     * a câmera ou o microfone não estão disponíveis, evitando mídia unidirecional.
      */
     createPeerConnection() {
       if (this.pc) {
@@ -114,12 +183,29 @@
 
       this.pc = new RTCPeerConnection(RTC_CONFIG);
       this.pendingCandidates = [];
+      this.remoteStream = new MediaStream();
+      this.makingOffer = false;
+      this.ignoreOffer = false;
 
-      // Adiciona as faixas locais ao RTCPeerConnection
-      if (this.localStream) {
-        for (const track of this.localStream.getTracks()) {
-          this.pc.addTrack(track, this.localStream);
-        }
+      const audioTransceiver = this.pc.addTransceiver('audio', { direction: 'sendrecv' });
+      const videoTransceiver = this.pc.addTransceiver('video', { direction: 'sendrecv' });
+      this.audioSender = audioTransceiver.sender;
+      this.videoSender = videoTransceiver.sender;
+
+      // Canal de dados negociado previamente (mesmo id nos dois lados) usado apenas
+      // para metadados de estado, como aviso de compartilhamento de tela.
+      this.setupMetaChannel();
+
+      if (this.micAudioTrack) {
+        this.audioSender.replaceTrack(this.micAudioTrack).catch(() => {});
+      }
+
+      const activeVideoTrack = this.isScreenSharing && this.screenStream
+        ? this.screenStream.getVideoTracks()[0]
+        : this.cameraVideoTrack;
+
+      if (activeVideoTrack) {
+        this.videoSender.replaceTrack(activeVideoTrack).catch(() => {});
       }
 
       // Trata candidatos ICE gerados localmente
@@ -129,25 +215,106 @@
         }
       };
 
-      // Trata recebimento de stream remota
+      // Trata recebimento de faixas remotas usando uma única MediaStream
       this.pc.ontrack = (event) => {
-        if (!this.remoteStream) {
-          this.remoteStream = new MediaStream();
-          this.emit('remote_stream', this.remoteStream);
+        const track = event.track;
+        const alreadyAdded = this.remoteStream.getTracks().some((t) => t.id === track.id);
+        if (!alreadyAdded) {
+          this.remoteStream.addTrack(track);
         }
-        this.remoteStream.addTrack(event.track);
+
+        track.onended = () => {
+          try {
+            this.remoteStream.removeTrack(track);
+          } catch {
+            // Ignora faixas já removidas
+          }
+        };
+
+        this.emit('remote_stream', this.remoteStream);
       };
 
       // Trata mudanças de estado da conexão
       this.pc.onconnectionstatechange = () => {
-        this.emit('connection_state_change', this.pc.connectionState);
+        const state = this.pc.connectionState;
+        this.emit('connection_state_change', state);
+        if (state === 'connected') {
+          this.iceRestartAttempts = 0;
+        }
       };
 
       this.pc.oniceconnectionstatechange = () => {
-        this.emit('ice_connection_state_change', this.pc.iceConnectionState);
+        const state = this.pc.iceConnectionState;
+        this.emit('ice_connection_state_change', state);
+        if (state === 'failed') {
+          this.restartIce();
+        }
       };
 
       this.optimizeVideoQuality();
+    }
+
+    /**
+     * Cria um canal de dados negociado para trocar apenas metadados de estado.
+     * Nenhum conteúdo sensível trafega por este canal.
+     */
+    setupMetaChannel() {
+      try {
+        this.metaChannel = this.pc.createDataChannel('meta', { negotiated: true, id: 0 });
+      } catch {
+        this.metaChannel = null;
+        return;
+      }
+
+      this.metaChannel.onopen = () => {
+        // Reenvia o estado atual ao (re)abrir o canal
+        this.sendMeta({ kind: 'screenshare', active: this.isScreenSharing });
+      };
+
+      this.metaChannel.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data && data.kind === 'screenshare') {
+            this.emit('remote_screenshare', !!data.active);
+          }
+        } catch {
+          // Ignora metadados inválidos
+        }
+      };
+    }
+
+    sendMeta(data) {
+      if (this.metaChannel && this.metaChannel.readyState === 'open') {
+        try {
+          this.metaChannel.send(JSON.stringify(data));
+        } catch {
+          // Ignora falhas de envio de metadados
+        }
+      }
+    }
+
+    /**
+     * Tenta uma reinicialização ICE quando a conexão falha.
+     * Somente o par impolite (iniciador) reinicia, evitando colisões.
+     */
+    async restartIce() {
+      if (!this.pc || this.isPolite) return;
+      if (this.iceRestartAttempts >= 3) {
+        this.emit('error', {
+          code: 'ICE_FAILED',
+          message: 'Não foi possível estabelecer a conexão de mídia. Uma rede restrita pode exigir um servidor TURN.'
+        });
+        return;
+      }
+      this.iceRestartAttempts += 1;
+      try {
+        if (typeof this.pc.restartIce === 'function') {
+          this.pc.restartIce();
+        }
+        await this.createAndSendOffer({ iceRestart: true });
+      } catch (err) {
+        console.error('Falha ao reiniciar ICE:', err);
+      }
     }
 
     /**
@@ -177,25 +344,26 @@
     setupSignalingListeners() {
       // Quando outro participante entra na sala e somos o iniciador
       this.signaling.on('peer_joined', async () => {
+        await this.mediaReady;
         this.createPeerConnection();
         await this.createAndSendOffer();
       });
 
       // Quando recebemos uma oferta SDP
       this.signaling.on('offer', async (msg) => {
-        if (!this.pc) {
-          this.createPeerConnection();
-        }
+        await this.mediaReady;
         await this.handleOffer(msg.sdp);
       });
 
       // Quando recebemos uma resposta SDP
       this.signaling.on('answer', async (msg) => {
+        await this.mediaReady;
         await this.handleAnswer(msg.sdp);
       });
 
       // Quando recebemos um candidato ICE
       this.signaling.on('ice_candidate', async (msg) => {
+        await this.mediaReady;
         await this.handleCandidate(msg.candidate);
       });
 
@@ -205,22 +373,46 @@
       });
     }
 
-    async createAndSendOffer() {
+    async createAndSendOffer(options = {}) {
+      if (!this.pc) return;
       try {
-        const offer = await this.pc.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true
-        });
+        this.makingOffer = true;
+        const offer = await this.pc.createOffer(options);
+        if (this.pc.signalingState !== 'stable' && !options.iceRestart) {
+          return;
+        }
         await this.pc.setLocalDescription(offer);
         this.signaling.sendOffer(this.pc.localDescription);
       } catch (err) {
         console.error('Erro ao criar oferta WebRTC:', err);
         this.emit('error', { code: 'OFFER_ERROR', message: 'Falha ao iniciar negociação de mídia.' });
+      } finally {
+        this.makingOffer = false;
       }
     }
 
+    /**
+     * Trata ofertas recebidas usando o padrão "perfect negotiation",
+     * evitando condições de corrida quando os participantes entram em ordens diferentes.
+     */
     async handleOffer(sdp) {
+      if (!sdp) return;
+
+      if (!this.pc) {
+        this.createPeerConnection();
+      }
+
+      const offerCollision = this.makingOffer || this.pc.signalingState !== 'stable';
+      this.ignoreOffer = !this.isPolite && offerCollision;
+      if (this.ignoreOffer) {
+        return;
+      }
+
       try {
+        if (offerCollision && typeof this.pc.setLocalDescription === 'function') {
+          await this.pc.setLocalDescription({ type: 'rollback' });
+        }
+
         await this.pc.setRemoteDescription(new RTCSessionDescription(sdp));
         await this.processPendingCandidates();
 
@@ -234,6 +426,10 @@
     }
 
     async handleAnswer(sdp) {
+      if (!this.pc || !sdp) return;
+      if (this.pc.signalingState !== 'have-local-offer') {
+        return;
+      }
       try {
         await this.pc.setRemoteDescription(new RTCSessionDescription(sdp));
         await this.processPendingCandidates();
@@ -253,7 +449,9 @@
       try {
         await this.pc.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (err) {
-        console.error('Erro ao adicionar candidato ICE:', err);
+        if (!this.ignoreOffer) {
+          console.error('Erro ao adicionar candidato ICE:', err);
+        }
       }
     }
 
@@ -311,10 +509,24 @@
       if (this.isScreenSharing) {
         await this.stopScreenShare();
         return false;
-      } else {
-        await this.startScreenShare();
-        return true;
       }
+      return this.startScreenShare();
+    }
+
+    /**
+     * Retorna o RTCRtpSender de vídeo, mesmo quando ele ainda não possui faixa.
+     */
+    getVideoSender() {
+      if (!this.pc) return null;
+      if (this.videoSender && this.pc.getSenders().includes(this.videoSender)) {
+        return this.videoSender;
+      }
+      const senders = this.pc.getSenders();
+      return (
+        senders.find((s) => s.track && s.track.kind === 'video') ||
+        senders.find((s) => !s.track) ||
+        null
+      );
     }
 
     async startScreenShare() {
@@ -328,62 +540,122 @@
           width: { ideal: 1920, max: 3840 },
           height: { ideal: 1080, max: 2160 },
           frameRate: { ideal: 30, max: 60 }
-        }
+        },
+        audio: true
       };
 
+      let stream;
       try {
-        this.screenStream = await navigator.mediaDevices.getDisplayMedia(constraints);
-        const screenTrack = this.screenStream.getVideoTracks()[0];
-
-        if (!screenTrack) {
-          throw new Error('Nenhuma faixa de vídeo de tela capturada.');
-        }
-
-        // Trata quando o usuário clica no botão nativo "Parar compartilhamento" do navegador
-        screenTrack.onended = () => {
-          this.stopScreenShare();
-        };
-
-        // Substitui a faixa de vídeo enviada para o peer
-        if (this.pc) {
-          const senders = this.pc.getSenders();
-          const videoSender = senders.find((s) => s.track && s.track.kind === 'video');
-          if (videoSender) {
-            await videoSender.replaceTrack(screenTrack);
-          }
-        }
-
-        this.isScreenSharing = true;
-        this.emit('screenshare_started', this.screenStream);
-        return true;
+        stream = await navigator.mediaDevices.getDisplayMedia(constraints);
       } catch (err) {
-        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+        if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError' || err.name === 'AbortError') {
           // Usuário cancelou o compartilhamento no seletor do navegador
           return false;
         }
         throw err;
       }
+
+      const screenTrack = stream.getVideoTracks()[0];
+      if (!screenTrack) {
+        stream.getTracks().forEach((t) => t.stop());
+        throw new Error('Nenhuma faixa de vídeo de tela capturada.');
+      }
+
+      this.screenStream = stream;
+      this.isScreenSharing = true;
+
+      // Trata quando o usuário clica no botão nativo "Parar compartilhamento" do navegador
+      screenTrack.addEventListener('ended', () => {
+        this.stopScreenShare().catch((err) => console.error('Erro ao encerrar compartilhamento:', err));
+      });
+
+      // Substitui a faixa de vídeo enviada para o peer
+      const videoSender = this.getVideoSender();
+      if (videoSender) {
+        await videoSender.replaceTrack(screenTrack);
+        this.videoSender = videoSender;
+      }
+
+      // Mixa o áudio do sistema (quando disponível) com o microfone, sem quebrá-lo
+      await this.applyScreenAudio(stream);
+
+      this.sendMeta({ kind: 'screenshare', active: true });
+      this.optimizeVideoQuality();
+      this.emit('screenshare_started', this.screenStream);
+      return true;
+    }
+
+    /**
+     * Mixa o áudio do sistema compartilhado com o microfone usando Web Audio API.
+     * Se o navegador não fornecer áudio do sistema ou não suportar a API,
+     * o microfone continua sendo enviado normalmente.
+     */
+    async applyScreenAudio(screenStream) {
+      const systemAudioTrack = screenStream.getAudioTracks()[0];
+      if (!systemAudioTrack || !this.micAudioTrack) return;
+
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx || !this.audioSender) return;
+
+      try {
+        const context = new AudioCtx();
+        const destination = context.createMediaStreamDestination();
+        context.createMediaStreamSource(new MediaStream([this.micAudioTrack])).connect(destination);
+        context.createMediaStreamSource(new MediaStream([systemAudioTrack])).connect(destination);
+
+        const mixedTrack = destination.stream.getAudioTracks()[0];
+        if (!mixedTrack) {
+          await context.close();
+          return;
+        }
+
+        mixedTrack.enabled = !this.isAudioMuted;
+        await this.audioSender.replaceTrack(mixedTrack);
+        this.audioMixer = { context, mixedTrack };
+      } catch (err) {
+        console.warn('Não foi possível mixar o áudio do sistema; mantendo apenas o microfone.', err);
+      }
+    }
+
+    async restoreMicrophoneAudio() {
+      if (!this.audioMixer) return;
+      const { context, mixedTrack } = this.audioMixer;
+      this.audioMixer = null;
+
+      try {
+        if (this.audioSender && this.micAudioTrack) {
+          await this.audioSender.replaceTrack(this.micAudioTrack);
+        }
+        mixedTrack.stop();
+        await context.close();
+      } catch (err) {
+        console.warn('Falha ao restaurar o áudio do microfone:', err);
+      }
     }
 
     async stopScreenShare() {
       if (!this.isScreenSharing) return;
+      this.isScreenSharing = false;
 
       if (this.screenStream) {
         this.screenStream.getTracks().forEach((track) => track.stop());
         this.screenStream = null;
       }
 
-      // Restaura a faixa da câmera original
-      if (this.pc && this.cameraVideoTrack) {
-        const senders = this.pc.getSenders();
-        const videoSender = senders.find((s) => s.track && s.track.kind === 'video') ||
-                            senders.find((s) => s.track === null);
-        if (videoSender) {
-          await videoSender.replaceTrack(this.cameraVideoTrack);
+      await this.restoreMicrophoneAudio();
+
+      // Restaura a faixa da câmera original (ou remove o vídeo se não houver câmera)
+      const videoSender = this.getVideoSender();
+      if (videoSender) {
+        try {
+          await videoSender.replaceTrack(this.cameraVideoTrack || null);
+        } catch (err) {
+          console.error('Erro ao restaurar a faixa da câmera:', err);
         }
       }
 
-      this.isScreenSharing = false;
+      this.sendMeta({ kind: 'screenshare', active: false });
+      this.optimizeVideoQuality();
       this.emit('screenshare_stopped', this.localStream);
     }
 
@@ -396,10 +668,23 @@
         this.pc.close();
         this.pc = null;
       }
+      if (this.metaChannel) {
+        this.metaChannel.onopen = null;
+        this.metaChannel.onmessage = null;
+        try {
+          this.metaChannel.close();
+        } catch {
+          // Ignora canal já fechado
+        }
+        this.metaChannel = null;
+      }
+      this.audioSender = null;
+      this.videoSender = null;
+      this.pendingCandidates = [];
     }
 
-    cleanup() {
-      this.stopScreenShare();
+    async cleanup() {
+      await this.stopScreenShare();
 
       if (this.localStream) {
         this.localStream.getTracks().forEach((t) => t.stop());
@@ -411,6 +696,9 @@
         this.remoteStream = null;
       }
 
+      this.cameraVideoTrack = null;
+      this.micAudioTrack = null;
+      this.markMediaReady();
       this.closePeerConnection();
     }
   }
