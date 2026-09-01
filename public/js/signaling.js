@@ -10,6 +10,8 @@
       this.ws = null;
       this.roomId = null;
       this.password = null;
+      this.userName = null;
+      this.peerName = null;
       this.isInitiator = false;
       this.peerId = null;
       this.listeners = new Map();
@@ -17,6 +19,13 @@
       this.maxReconnectAttempts = 5;
       this.isExplicitlyClosed = false;
       this.heartbeatTimer = null;
+    }
+
+    /**
+     * Indica se o WebSocket está aberto e pronto para envio
+     */
+    isOpen() {
+      return !!this.ws && this.ws.readyState === WebSocket.OPEN;
     }
 
     on(event, callback) {
@@ -97,13 +106,23 @@
         case 'joined':
           this.isInitiator = msg.isInitiator;
           this.peerId = msg.peerId;
+          this.userName = msg.userName || this.userName;
+          this.peerName = msg.peerName || null;
           this.emit('joined', msg);
           break;
         case 'peer_joined':
+          this.peerName = msg.userName || null;
           this.emit('peer_joined', msg);
           break;
         case 'peer_left':
+          this.peerName = null;
           this.emit('peer_left', msg);
+          break;
+        case 'chat':
+          this.emit('chat', msg);
+          break;
+        case 'chat_delivered':
+          this.emit('chat_delivered', msg);
           break;
         case 'offer':
           this.emit('offer', msg);
@@ -126,18 +145,34 @@
     }
 
     send(data) {
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      if (this.isOpen()) {
         this.ws.send(JSON.stringify(data));
+        return true;
       }
+      return false;
     }
 
-    join(roomId, password) {
+    join(roomId, password, userName) {
       this.roomId = roomId;
       this.password = password;
+      this.userName = userName;
       this.send({
         type: 'join',
         roomId,
-        password
+        password,
+        userName
+      });
+    }
+
+    /**
+     * Envia uma mensagem de chat para o outro participante.
+     * Retorna false quando o WebSocket está indisponível.
+     */
+    sendChat(text, messageId) {
+      return this.send({
+        type: 'chat',
+        text,
+        messageId
       });
     }
 

@@ -35,6 +35,61 @@
   }
 
   /**
+   * Limites compartilhados com o servidor
+   */
+  const MAX_USER_NAME_LENGTH = 24;
+  const MAX_CHAT_LENGTH = 500;
+
+  /**
+   * Valida e sanitiza o nome de usuário no cliente, com as mesmas regras do servidor.
+   * Retorna null quando o nome resultante é vazio.
+   */
+  function sanitizeUserName(rawName) {
+    if (typeof rawName !== 'string') return null;
+    const clean = rawName
+      .replace(/[\u0000-\u001F\u007F<>&"'`\\]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, MAX_USER_NAME_LENGTH);
+    return clean.length > 0 ? clean : null;
+  }
+
+  /**
+   * Valida e sanitiza uma mensagem de chat no cliente.
+   * Retorna null quando a mensagem é vazia ou inválida.
+   */
+  function sanitizeChatText(rawText) {
+    if (typeof rawText !== 'string') return null;
+    const clean = rawText
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+      .trim()
+      .slice(0, MAX_CHAT_LENGTH);
+    return clean.length > 0 ? clean : null;
+  }
+
+  /**
+   * Formata um timestamp (ms) como HH:MM para exibição no chat
+   */
+  function formatClockTime(timestamp) {
+    const date = new Date(typeof timestamp === 'number' ? timestamp : Date.now());
+    const pad = (num) => String(num).padStart(2, '0');
+    return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  /**
+   * Verifica se a Fullscreen API está disponível no navegador atual
+   */
+  function isFullscreenSupported() {
+    if (typeof document === 'undefined') return false;
+    const el = document.documentElement;
+    return !!(
+      document.fullscreenEnabled ||
+      document.webkitFullscreenEnabled ||
+      (el && (el.requestFullscreen || el.webkitRequestFullscreen))
+    );
+  }
+
+  /**
    * Verifica se o navegador atual suporta APIs WebRTC essenciais
    */
   function isWebRTCSupported() {
@@ -70,6 +125,16 @@
     autoGainControl: true,
     sampleRate: 48000,
     channelCount: 2
+  };
+
+  /**
+   * Fallback de áudio compatível com navegadores/dispositivos que não aceitam
+   * sampleRate ou channelCount, mantendo o processamento essencial de voz.
+   */
+  const AUDIO_CONSTRAINTS_FALLBACK = {
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true
   };
 
   /**
@@ -117,15 +182,24 @@
       height: { ideal: 1080, max: 2160 },
       frameRate: { ideal: 30, max: 60 }
     },
-    audio: false
+    // Permite compartilhar o áudio do sistema quando o navegador oferecer a opção.
+    // O microfone continua funcionando normalmente (as faixas são mixadas).
+    audio: true
   };
 
   window.VideoConfUtils = {
     escapeHtml,
     formatDuration,
+    formatClockTime,
+    sanitizeUserName,
+    sanitizeChatText,
     isWebRTCSupported,
     isDisplayMediaSupported,
+    isFullscreenSupported,
+    MAX_USER_NAME_LENGTH,
+    MAX_CHAT_LENGTH,
     AUDIO_CONSTRAINTS,
+    AUDIO_CONSTRAINTS_FALLBACK,
     VIDEO_PROFILES,
     SCREEN_SHARE_CONSTRAINTS
   };

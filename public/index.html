@@ -26,6 +26,20 @@
 
         <form id="auth-form" class="auth-form" novalidate>
           <div class="form-group">
+            <label for="username-input">Seu Nome de Usuário</label>
+            <input
+              type="text"
+              id="username-input"
+              name="username"
+              placeholder="Como você quer aparecer na chamada"
+              maxlength="24"
+              autocomplete="nickname"
+              required
+            >
+            <span class="form-hint">Obrigatório. Até 24 caracteres, visível para o outro participante.</span>
+          </div>
+
+          <div class="form-group">
             <label for="room-input">Identificador da Sala</label>
             <input
               type="text"
@@ -106,6 +120,8 @@
         </div>
       </header>
 
+      <!-- Corpo da chamada: vídeos + chat -->
+      <div class="call-body">
       <!-- Grade de Vídeo -->
       <section class="video-grid" id="video-grid" aria-label="Área de vídeos">
         
@@ -124,8 +140,51 @@
             <p class="placeholder-text" id="remote-placeholder-text">Aguardando outro participante entrar...</p>
           </div>
 
+          <!-- Ações sobre o vídeo remoto -->
+          <div class="video-actions">
+            <button
+              type="button"
+              id="btn-enable-audio"
+              class="video-action-btn video-action-highlight"
+              aria-label="Ativar áudio da chamada"
+              title="Ativar áudio da chamada"
+              style="display: none;"
+            >
+              <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+              </svg>
+              <span class="btn-text">Ativar áudio</span>
+            </button>
+
+            <button
+              type="button"
+              id="btn-fullscreen"
+              class="video-action-btn"
+              aria-label="Abrir vídeo remoto em tela cheia"
+              aria-pressed="false"
+              title="Abrir em tela cheia"
+            >
+              <svg class="icon icon-fullscreen-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M8 3H5a2 2 0 0 0-2 2v3"></path>
+                <path d="M16 3h3a2 2 0 0 1 2 2v3"></path>
+                <path d="M8 21H5a2 2 0 0 1-2-2v-3"></path>
+                <path d="M16 21h3a2 2 0 0 0 2-2v-3"></path>
+              </svg>
+              <svg class="icon icon-fullscreen-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="display: none;">
+                <path d="M3 8h3a2 2 0 0 0 2-2V3"></path>
+                <path d="M21 8h-3a2 2 0 0 1-2-2V3"></path>
+                <path d="M3 16h3a2 2 0 0 1 2 2v3"></path>
+                <path d="M21 16h-3a2 2 0 0 0-2 2v3"></path>
+              </svg>
+              <span class="btn-text" id="fullscreen-btn-text">Tela cheia</span>
+            </button>
+          </div>
+
           <div class="video-overlay-info">
-            <span class="peer-label">Participante Remoto</span>
+            <span class="peer-label" id="remote-name-label">Participante Remoto</span>
+            <span class="indicator-badge indicator-share" id="remote-screenshare-badge" style="display: none;">Compartilhando tela</span>
             <span class="media-indicator" id="remote-media-indicator" style="display: none;"></span>
           </div>
         </div>
@@ -145,7 +204,7 @@
           </div>
 
           <div class="video-overlay-info">
-            <span class="peer-label">Você</span>
+            <span class="peer-label" id="local-name-label">Você</span>
             <div class="local-indicators">
               <span class="indicator-badge" id="local-screenshare-badge" style="display: none;">Tela</span>
               <span class="indicator-badge indicator-muted" id="local-muted-badge" style="display: none;">Mutado</span>
@@ -154,6 +213,43 @@
         </div>
 
       </section>
+
+      <!-- Painel de Chat -->
+      <aside class="chat-panel" id="chat-panel" aria-label="Chat da chamada" hidden>
+        <div class="chat-header">
+          <h2 class="chat-title">Chat da chamada</h2>
+          <button type="button" id="btn-close-chat" class="chat-close-btn" aria-label="Fechar chat">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+
+        <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-relevant="additions" tabindex="0">
+          <p class="chat-empty" id="chat-empty">As mensagens desta chamada não são armazenadas no servidor.</p>
+        </div>
+
+        <form class="chat-form" id="chat-form" novalidate>
+          <label class="visually-hidden" for="chat-input">Escreva sua mensagem</label>
+          <input
+            type="text"
+            id="chat-input"
+            class="chat-input"
+            placeholder="Escreva uma mensagem..."
+            maxlength="500"
+            autocomplete="off"
+          >
+          <button type="submit" id="btn-send-chat" class="chat-send-btn" aria-label="Enviar mensagem">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="22" y1="2" x2="11" y2="13"></line>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+            </svg>
+          </button>
+        </form>
+      </aside>
+      </div>
+
 
       <!-- Barra de Controles Inferior -->
       <nav class="controls-bar" aria-label="Controles da chamada">
@@ -218,6 +314,23 @@
             <line x1="12" y1="5" x2="12" y2="13"></line>
           </svg>
           <span class="btn-text" id="screen-btn-text">Compartilhar Tela</span>
+        </button>
+
+        <button
+          type="button"
+          id="btn-toggle-chat"
+          class="control-btn"
+          aria-label="Abrir chat"
+          aria-pressed="false"
+          aria-controls="chat-panel"
+          aria-expanded="false"
+          title="Chat da chamada"
+        >
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+          </svg>
+          <span class="btn-text">Chat</span>
+          <span class="chat-unread-badge" id="chat-unread-badge" style="display: none;" aria-hidden="true">0</span>
         </button>
 
         <button
