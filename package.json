@@ -1,0 +1,25 @@
+{
+  "name": "ssdsss-videoconference",
+  "version": "1.0.0",
+  "description": "Aplicação moderna e funcional de videoconferência P2P para 2 pessoas via WebRTC",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/**/*.test.js",
+    "lint": "node --check src/server.js src/roomManager.js public/js/utils.js public/js/signaling.js public/js/webrtc.js public/js/app.js"
+  },
+  "keywords": [
+    "webrtc",
+    "videoconference",
+    "videochamada",
+    "p2p",
+    "screenshare",
+    "websocket"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}
