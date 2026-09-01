@@ -137,6 +137,16 @@
     autoGainControl: true
   };
 
+  function buildAudioConstraints(deviceId, fallback = false) {
+    const constraints = {
+      ...(fallback ? AUDIO_CONSTRAINTS_FALLBACK : AUDIO_CONSTRAINTS)
+    };
+    if (typeof deviceId === 'string' && deviceId) {
+      constraints.deviceId = { exact: deviceId };
+    }
+    return constraints;
+  }
+
   /**
    * Perfis progressivos de vídeo para fallbacks caso o hardware não suporte 1080p
    */
@@ -200,6 +210,7 @@
     MAX_CHAT_LENGTH,
     AUDIO_CONSTRAINTS,
     AUDIO_CONSTRAINTS_FALLBACK,
+    buildAudioConstraints,
     VIDEO_PROFILES,
     SCREEN_SHARE_CONSTRAINTS
   };

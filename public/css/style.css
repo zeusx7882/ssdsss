@@ -1,6 +1,6 @@
 :root {
-  --bg-main: #0b0f19;
-  --bg-card: #151d2f;
+  --bg-main: #070b14;
+  --bg-card: #111827;
   --bg-surface: #1e293b;
   --bg-surface-hover: #334155;
   --text-primary: #f8fafc;
@@ -34,7 +34,7 @@ body {
   font-family: var(--font-family);
   background-color: var(--bg-main);
   color: var(--text-primary);
-  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
@@ -45,7 +45,7 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100dvh;
   position: relative;
 }
 
@@ -239,8 +239,11 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
-  height: 100vh;
-  background-color: var(--bg-main);
+  height: 100dvh;
+  background:
+    radial-gradient(circle at 15% 20%, rgba(59, 130, 246, 0.11), transparent 32%),
+    radial-gradient(circle at 85% 80%, rgba(16, 185, 129, 0.08), transparent 30%),
+    var(--bg-main);
   position: relative;
   overflow: hidden;
 }
@@ -376,14 +379,14 @@ body {
   width: 100%;
   height: 100%;
   max-width: 1280px;
-  max-height: calc(100vh - 160px);
+  max-height: calc(100dvh - 168px);
   background: #000;
 }
 
 .remote-video-card video {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
   background: #000;
 }
 
@@ -399,6 +402,23 @@ body {
   border: 2px solid rgba(255, 255, 255, 0.2);
   transition: transform 0.2s ease, width 0.2s ease, height 0.2s ease;
   background: #111;
+}
+
+.remote-video-card.receiving-screenshare video,
+.remote-video-card:fullscreen video,
+.remote-video-card:-webkit-full-screen video {
+  object-fit: contain;
+}
+
+.video-card.is-speaking {
+  border-color: #34d399;
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.32), var(--shadow-lg);
+}
+
+.video-card.is-speaking .peer-label::after {
+  content: " · Falando";
+  font-weight: 700;
+  color: #6ee7b7;
 }
 
 .local-video-card video {
@@ -568,8 +588,9 @@ body {
   color: #fff;
 }
 
-/* Painel de Chat */
-.chat-panel {
+/* Painéis laterais */
+.chat-panel,
+.settings-panel {
   width: 340px;
   max-width: 100%;
   display: flex;
@@ -581,6 +602,97 @@ body {
 
 .chat-panel[hidden] {
   display: none;
+}
+
+.settings-panel[hidden] {
+  display: none;
+}
+
+.panel-eyebrow {
+  margin-bottom: 0.2rem;
+  color: var(--primary);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.settings-content {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.device-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.device-field label {
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.device-field select {
+  width: 100%;
+  padding: 0.75rem;
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: inherit;
+}
+
+.device-field select:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.device-field select:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.audio-meter {
+  height: 8px;
+  overflow: hidden;
+  background: #020617;
+  border-radius: var(--radius-full);
+}
+
+.audio-meter span {
+  display: block;
+  width: 0;
+  height: 100%;
+  background: linear-gradient(90deg, var(--success), var(--warning));
+  border-radius: inherit;
+  transition: width 100ms linear;
+}
+
+.device-help,
+.privacy-note {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.privacy-note {
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.btn-secondary {
+  color: var(--text-primary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+}
+
+.btn-secondary:hover {
+  background: var(--bg-surface-hover);
 }
 
 .chat-header {
@@ -996,26 +1108,33 @@ body {
   }
 
   .controls-bar {
-    height: 70px;
-    padding: 0 0.5rem;
-    gap: 0.5rem;
+    height: calc(64px + env(safe-area-inset-bottom));
+    padding: 0.35rem 0.4rem env(safe-area-inset-bottom);
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 0.3rem;
   }
 
   .control-btn {
-    width: 60px;
-    height: 52px;
+    width: 100%;
+    height: 50px;
+    min-width: 0;
   }
 
   .control-btn .btn-text {
-    font-size: 0.62rem;
+    display: none;
   }
 
   /* Chat ocupa a tela inteira em telas pequenas */
-  .chat-panel {
+  .chat-panel,
+  .settings-panel {
     position: absolute;
-    inset: 0;
+    inset: max(3.5rem, 12dvh) 0 0;
     width: 100%;
     border-left: none;
+    border-top: 1px solid var(--border);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    box-shadow: 0 -16px 40px rgba(0, 0, 0, 0.55);
   }
 
   .video-actions {
@@ -1026,6 +1145,15 @@ body {
   .video-action-btn .btn-text {
     display: none;
   }
+
+  .remote-video-card {
+    border-radius: var(--radius-sm);
+  }
+
+  .local-video-card {
+    bottom: 0.75rem;
+    right: 0.75rem;
+  }
 }
 
 /* Vídeo remoto em tela cheia ocupa toda a área disponível */
@@ -1034,6 +1162,16 @@ body {
 .remote-video-card:fullscreen {
   width: 100%;
   height: 100%;
+  background: #000;
+}
+
+.remote-video-card:-webkit-full-screen {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
   background: #000;
 }
 

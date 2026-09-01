@@ -53,7 +53,14 @@ function requestHandler(req, res) {
   }
 
   // Sanitização de caminho para servir static files
-  let safePath = path.normalize(decodeURIComponent(req.url.split('?')[0]));
+  let safePath;
+  try {
+    safePath = path.normalize(decodeURIComponent(req.url.split('?')[0]));
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=UTF-8' });
+    res.end('Requisição inválida.');
+    return;
+  }
   if (safePath === '/' || safePath === '') {
     safePath = '/index.html';
   }

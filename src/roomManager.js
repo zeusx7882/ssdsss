@@ -98,6 +98,7 @@ class RoomManager {
       typeof sdp === 'object' &&
       (sdp.type === 'offer' || sdp.type === 'answer' || sdp.type === 'pranswer' || sdp.type === 'rollback') &&
       typeof sdp.sdp === 'string' &&
+      sdp.sdp.length > 0 &&
       sdp.sdp.length <= MAX_SDP_LENGTH
     );
   }
@@ -228,7 +229,7 @@ class RoomManager {
 
     let payload;
     if (message.type === 'offer' || message.type === 'answer') {
-      if (!this.isValidSdp(message.sdp)) {
+      if (!this.isValidSdp(message.sdp) || message.sdp.type !== message.type) {
         this.send(ws, {
           type: 'error',
           code: 'INVALID_SDP',

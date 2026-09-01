@@ -19,6 +19,7 @@
       this.maxReconnectAttempts = 5;
       this.isExplicitlyClosed = false;
       this.heartbeatTimer = null;
+      this.reconnectTimer = null;
     }
 
     /**
@@ -46,11 +47,12 @@
       }
     }
 
-    connect() {
+    connect(isReconnect = false) {
       return new Promise((resolve, reject) => {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws`;
 
+        let settled = false;
         try {
           this.ws = new WebSocket(wsUrl);
         } catch (err) {
@@ -62,6 +64,11 @@
           this.isExplicitlyClosed = false;
           this.startHeartbeat();
           this.emit('connected');
+          if (isReconnect && this.roomId && this.password && this.userName) {
+            this.join(this.roomId, this.password, this.userName);
+            this.emit('reconnected');
+          }
+          settled = true;
           resolve();
         };
 
@@ -76,17 +83,46 @@
 
         this.ws.onerror = (err) => {
           this.emit('error', { code: 'WS_ERROR', message: 'Erro de conexão com o servidor de sinalização.' });
+          if (!settled) {
+            settled = true;
+            reject(err);
+          }
         };
 
         this.ws.onclose = (event) => {
           this.stopHeartbeat();
           this.emit('disconnected', event);
+          if (!settled) {
+            settled = true;
+            reject(new Error('O servidor de sinalização encerrou a conexão.'));
+          }
+          this.scheduleReconnect();
         };
       });
     }
 
+    scheduleReconnect() {
+      if (this.isExplicitlyClosed || !this.roomId || this.reconnectTimer) return;
+      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+        this.emit('reconnect_failed');
+        return;
+      }
+      const delay = Math.min(1000 * (2 ** this.reconnectAttempts), 8000);
+      this.reconnectAttempts += 1;
+      this.emit('reconnecting', {
+        attempt: this.reconnectAttempts,
+        maxAttempts: this.maxReconnectAttempts
+      });
+      this.reconnectTimer = setTimeout(() => {
+        this.reconnectTimer = null;
+        this.connect(true).catch(() => this.scheduleReconnect());
+      }, delay);
+    }
+
     startHeartbeat() {
       this.stopHeartbeat();
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
       this.heartbeatTimer = setInterval(() => {
         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
           this.send({ type: 'ping' });
