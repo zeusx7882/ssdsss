@@ -586,6 +586,9 @@
       for (const track of audioTracks) {
         track.enabled = !this.isAudioMuted;
       }
+      if (this.audioMixer && this.audioMixer.mixedTrack) {
+        this.audioMixer.mixedTrack.enabled = !this.isAudioMuted;
+      }
       return this.isAudioMuted;
     }
 
