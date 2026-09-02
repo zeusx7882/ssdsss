@@ -6,7 +6,7 @@ Aplicação web moderna, responsiva, acessível e funcional de videoconferência
 
 ## 🚀 Funcionalidades
 
-- 🔒 **Acesso Protegido (apenas para teste)**: Entrada protegida pela senha fixa `1015`, solicitada antes de liberar a tela da chamada. Veja o aviso em [Segurança](#️-segurança-e-limitações-da-senha-fixa): **isso não é autenticação de produção**.
+- 🔒 **Acesso Protegido por Senha**: Entrada protegida por senha configurável via variável de ambiente (`ROOM_PASSWORD`, padrão `1015`), solicitada antes de liberar a tela da chamada. Veja detalhes em [Segurança](#️-segurança-e-senha-de-acesso-à-sala).
 - 🙋 **Nome de Usuário**: Cada participante escolhe um nome obrigatório antes de conectar. O nome é validado, limitado a 24 caracteres e sanitizado no cliente **e** no servidor, sendo exibido nos cards de vídeo e no chat.
 - 💬 **Chat Durante a Chamada**: Painel de chat responsivo (desktop e mobile) usando o mesmo WebSocket de sinalização, com autor, horário e estado de envio/recebimento. As mensagens **não são persistidas** no servidor.
 - ⛶ **Tela Cheia**: Botão dedicado para quem assiste abrir o vídeo remoto ou a tela compartilhada em tela cheia (Fullscreen API), com saída de tela cheia e aviso quando a API não está disponível.
@@ -26,10 +26,18 @@ Aplicação web moderna, responsiva, acessível e funcional de videoconferência
   - Fallback progressivo de resolução de vídeo (1080p Full HD -> 720p HD -> 480p SD -> Básico) conforme a capacidade do dispositivo e câmera.
   - Priorização de bitrate para transmissões nítidas.
 - 🎨 **Interface Moderna e Acessível**:
-  - Tema escuro com design glassmorphism responsivo para Desktop, Tablets e Smartphones.
+  - Tema preto elegante (charcoal/glassmorphism) com acento vibrante, responsivo para Desktop, Tablets e Smartphones.
   - Indicadores visuais de estado (Aguardando, Conectando, Conectado, Reconectando, Mudo, Compartilhando Tela).
-  - Suporte a acessibilidade (atributos ARIA, labels semânticos, foco visível).
+  - Suporte a acessibilidade (atributos ARIA, labels semânticos, foco visível, alto contraste opcional).
   - Notificações em formato Toast e modais informativos para erros e permissões negadas.
+- ✨ **Recursos Extras da Sala**:
+  - 😄 Reações flutuantes (emojis) enviadas em tempo real pelo canal de dados WebRTC.
+  - 🎥 Filtros rápidos de câmera para o seu próprio preview (preto e branco, sépia, frio, vintage).
+  - 🔕 Modo "Não perturbe" para silenciar notificações do chat durante o compartilhamento de tela.
+  - ⌨️ Atalhos de teclado (`Espaço` para falar temporariamente, `M` mutar, `V` câmera, `C` chat) com painel de ajuda.
+  - 🔗 Botão de copiar link da sala com feedback visual e preenchimento automático da sala via link (`?room=`).
+  - 📶 Indicador de qualidade de conexão em tempo real baseado em `RTCPeerConnection.getStats()`.
+  - 🌓 Alternância de alto contraste para acessibilidade.
 
 ---
 
@@ -123,7 +131,7 @@ Problemas corrigidos nesta versão:
 1. Abra [http://localhost:3000](http://localhost:3000) no seu navegador.
 2. Digite o **Seu Nome de Usuário** (obrigatório, até 24 caracteres).
 3. Digite o **Identificador da Sala** (por padrão `sala-principal`).
-4. Digite a senha de acesso: `1015`.
+4. Digite a senha de acesso (padrão `1015`, ou o valor definido em `ROOM_PASSWORD`).
 5. Clique em **Entrar na Chamada** e conceda as permissões de câmera e microfone solicitadas pelo navegador.
 6. Abra uma segunda aba (ou envie o link para outro participante) e repita o processo com a **mesma sala e senha**, usando um nome diferente.
 7. A chamada P2P se conectará automaticamente.
@@ -189,13 +197,13 @@ Navegadores modernos bloqueiam a reprodução de áudio sem interação do usuá
 
 ---
 
-## 🛡️ Segurança e Limitações da Senha Fixa
+## 🛡️ Segurança e Senha de Acesso à Sala
 
-### ⚠️ Aviso de Segurança
-- **A senha fixa `1015` existe apenas para teste e demonstração. Ela NÃO é um mecanismo de autenticação de produção.**
-- A senha é digitada no navegador e comparada no servidor de sinalização; qualquer pessoa com acesso ao endereço pode tentar adivinhá-la e não há proteção contra tentativas repetidas.
-- Não use esta aplicação como está para conversas sensíveis em ambiente público sem substituir a senha fixa por autenticação real.
-- **Limitação:** Uma senha estática/hardcoded não substitui um sistema de autenticação empresarial para produção (como OAuth2, JWT com expiração, SSO ou senhas individuais com hash bcrypt/argon2). Em um ambiente corporativo ou público aberto, recomenda-se integrar autenticação baseada em sessão ou tokens efêmeros gerados no backend.
+### Configurando a senha
+- A senha de acesso à sala é **configurável via variável de ambiente `ROOM_PASSWORD`**. Se não for definida, o padrão `1015` é usado.
+- Defina uma senha própria antes de publicar a aplicação, por exemplo `ROOM_PASSWORD=minha-senha-forte npm start`, ou configure a variável no painel do seu serviço de hospedagem.
+- A senha é digitada no navegador e comparada no servidor de sinalização; qualquer pessoa com acesso ao endereço e à senha pode entrar na sala — não há proteção contra tentativas repetidas de adivinhação (considere rate limiting no proxy reverso para uso público).
+- **Limitação conhecida:** por ser uma senha única compartilhada (e não uma conta por usuário), ela é adequada para chamadas privadas entre duas pessoas de confiança. Para cenários com necessidades de autenticação mais rígidas (múltiplas salas com controle de acesso individual, expiração de sessão, etc.), integre um sistema de autenticação dedicado (OAuth2, JWT, SSO).
 
 ### Medidas de Segurança Implementadas
 - **Validação no Servidor de Sinalização**: Mensagens de sinalização não autenticadas são sumariamente rejeitadas com `AUTH_FAILED`.
@@ -241,16 +249,54 @@ Para publicar esta aplicação em produção:
 
   > Nenhum serviço TURN pago é obrigatório nesta aplicação: você pode hospedar o seu próprio (Coturn é open source). **Nunca** comite credenciais reais no repositório; gere-as no backend com validade curta.
 - [ ] **Variáveis de Ambiente**:
-  - `PORT`: Porta de execução (padrão `3000`).
+  - `PORT`: Porta de execução (padrão `3000`, geralmente definida automaticamente pela hospedagem).
   - `HOST`: Interface de rede (padrão `0.0.0.0`).
+  - `ROOM_PASSWORD`: Senha de acesso à sala (padrão `1015` se não definida). **Defina uma senha própria em produção.**
 - [ ] **Rate Limiting e Proteção contra DoS**: Configure limites de conexões simultâneas por IP no proxy reverso ou no servidor Node.js.
+
+---
+
+## 🚀 Passo a Passo: Publicando em um Serviço de Hospedagem Real
+
+Esta aplicação não precisa de build step (é servida diretamente pelo Node.js) e está pronta para deploy direto em qualquer hospedagem que rode Node.js.
+
+### Render / Railway / Fly.io (genérico para PaaS Node.js)
+1. Crie um novo serviço "Web Service" apontando para este repositório.
+2. Comando de build: nenhum necessário (ou `npm install`, executado automaticamente pela maioria das plataformas).
+3. Comando de start: `npm start`.
+4. Defina as variáveis de ambiente no painel do serviço:
+   - `ROOM_PASSWORD` com uma senha própria.
+   - `NODE_ENV=production` (opcional, mas recomendado).
+   - Não é necessário definir `PORT`/`HOST` manualmente — a maioria das plataformas injeta `PORT` automaticamente e o servidor já lê `process.env.PORT`.
+5. Habilite HTTPS/TLS (a maioria das plataformas fornece automaticamente um domínio `https://` com certificado gerenciado). O servidor detecta o protocolo pela própria página e usa `wss://` automaticamente quando servido via HTTPS.
+6. Se a plataforma usa um proxy reverso próprio (a maioria usa), confirme que o caminho `/ws` tem suporte a upgrade de WebSocket — Render, Railway e Fly.io suportam isso nativamente, sem configuração extra.
+7. Publique. Acesse a URL fornecida pela plataforma (ex: `https://seu-app.onrender.com`), compartilhe com o outro participante e informe a senha configurada.
+
+### Heroku
+1. Crie um app novo e conecte o repositório (ou use `git push heroku main`).
+2. O `Procfile` não é necessário: o buildpack Node detecta `"start": "node src/server.js"` em `package.json` automaticamente.
+3. Configure `heroku config:set ROOM_PASSWORD=sua-senha NODE_ENV=production`.
+4. O Heroku já fornece HTTPS/WSS no domínio padrão `https://seu-app.herokuapp.com` e roteia upgrades de WebSocket automaticamente.
+
+### Servidor próprio (VPS) com Nginx + Node
+1. Instale o Node.js (versão LTS) no servidor.
+2. Copie o repositório para o servidor e rode `npm install --omit=dev`.
+3. Defina as variáveis de ambiente (por exemplo em um arquivo de serviço `systemd` ou `.env` carregado por um gerenciador de processos como `pm2`):
+   ```bash
+   ROOM_PASSWORD=sua-senha NODE_ENV=production PORT=3000 npm start
+   ```
+4. Use `pm2 start src/server.js --name videoconf` (ou `systemd`) para manter o processo ativo e reiniciar automaticamente.
+5. Configure um domínio próprio e emita um certificado TLS gratuito (Let's Encrypt via Certbot).
+6. Configure o Nginx como proxy reverso na frente do Node (veja o exemplo de configuração na seção [HTTPS e WSS](#-https-e-wss) acima), encaminhando `/ws` com upgrade de WebSocket habilitado.
+
+Após qualquer um destes passos, a aplicação está pronta para uso real — não é necessária nenhuma configuração adicional de "modo de teste": basta abrir a URL pública, informar nome, sala e a senha configurada.
 
 ---
 
 ## 🧪 Estrutura de Testes e Limitações
 
 A suíte de testes automatizada (`npm test`) cobre:
-- **Autenticação e Senha Fixa**: Validação de aceitação da senha `1015`, rejeição de senhas incorretas e garantia de não vazamento da credencial.
+- **Autenticação por Senha**: Validação de aceitação da senha configurada, rejeição de senhas incorretas e garantia de não vazamento da credencial.
 - **Regras de Sala e Capacidade**: Admissão de exatamente 2 participantes e rejeição estrita do 3º participante com `ROOM_FULL`.
 - **Roteamento de Sinalização**: Troca correta de `offer`, `answer` e `ice_candidate` entre os pares.
 - **Ciclo de Vida e Limpeza**: Notificação de saída (`peer_left`) e liberação de memória em salas vazias.

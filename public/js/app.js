@@ -86,6 +86,19 @@
   const modalMessage = document.getElementById('modal-message');
   const modalCloseBtn = document.getElementById('modal-close-btn');
 
+  // Novos recursos: link, qualidade, reações, filtros, DND, alto contraste, atalhos
+  const btnCopyLink = document.getElementById('btn-copy-link');
+  const connectionQuality = document.getElementById('connection-quality');
+  const btnToggleReactions = document.getElementById('btn-toggle-reactions');
+  const reactionsPopover = document.getElementById('reactions-popover');
+  const reactionsLayer = document.getElementById('reactions-layer');
+  const cameraFilterSelect = document.getElementById('camera-filter-select');
+  const toggleDnd = document.getElementById('toggle-dnd');
+  const toggleHighContrast = document.getElementById('toggle-high-contrast');
+  const btnToggleShortcuts = document.getElementById('btn-toggle-shortcuts');
+  const shortcutsModal = document.getElementById('shortcuts-modal');
+  const shortcutsCloseBtn = document.getElementById('shortcuts-close-btn');
+
   // Instâncias e Estados
   let signaling = null;
   let webrtc = null;
@@ -107,6 +120,21 @@
   const PIP_PADDING = 12;
   let pipState = loadPipState();
   let pipDrag = null;
+  let dndEnabled = false;
+  let qualityInterval = null;
+  let prevStatsSnapshot = null;
+  let pushToTalkActive = false;
+  let spaceKeyHeld = false;
+
+  // Preenche automaticamente a sala a partir de ?room= no link compartilhado
+  try {
+    const sharedRoom = new URLSearchParams(window.location.search).get('room');
+    if (sharedRoom) {
+      roomInput.value = sharedRoom.slice(0, 32);
+    }
+  } catch {
+    // Ignora ambientes sem suporte a URLSearchParams
+  }
 
   /**
    * Exibe mensagens de notificação Toast temporárias
@@ -1007,8 +1035,10 @@
       });
 
       if (!isChatOpen()) {
-        unreadMessages += 1;
-        updateUnreadBadge();
+        if (!(dndEnabled && webrtc && webrtc.isScreenSharing)) {
+          unreadMessages += 1;
+          updateUnreadBadge();
+        }
       }
     });
 
@@ -1101,6 +1131,10 @@
       setRemoteTyping(isTyping);
     });
 
+    webrtc.on('remote_reaction', (emoji) => {
+      spawnFloatingReaction(emoji);
+    });
+
     webrtc.on('connection_state_change', (state) => {
       if (state === 'connected') {
         updateConnectionStatus('Conectado', 'status-connected');
@@ -1108,14 +1142,20 @@
           remotePlaceholder.style.display = 'flex';
           remotePlaceholderText.textContent = 'Conectado, aguardando mídia remota...';
         }
+        startConnectionQualityMonitor();
       } else if (state === 'connecting' || state === 'new') {
         updateConnectionStatus('Estabelecendo conexão...', 'status-waiting');
       } else if (state === 'disconnected') {
         updateConnectionStatus('Reconectando...', 'status-reconnecting');
+        setConnectionQuality('poor');
       } else if (state === 'failed') {
         updateConnectionStatus('Falha na conexão', 'status-reconnecting');
+        stopConnectionQualityMonitor();
+        setConnectionQuality(null);
       } else if (state === 'closed') {
         updateConnectionStatus('Chamada encerrada', 'status-reconnecting');
+        stopConnectionQualityMonitor();
+        setConnectionQuality(null);
       }
     });
 
@@ -1289,6 +1329,230 @@
     navigator.mediaDevices.addEventListener('devicechange', () => {
       if (webrtc) refreshAudioDevices();
     });
+  }
+
+  // ==========================================================================
+  // Novos recursos: copiar link, reações, filtros, DND, alto contraste, atalhos
+  // ==========================================================================
+
+  btnCopyLink.addEventListener('click', async () => {
+    const url = `${window.location.origin}${window.location.pathname}?room=${encodeURIComponent(displayRoomName.textContent || roomInput.value || 'sala-principal')}`;
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        const tmp = document.createElement('textarea');
+        tmp.value = url;
+        tmp.style.position = 'fixed';
+        tmp.style.opacity = '0';
+        document.body.appendChild(tmp);
+        tmp.select();
+        document.execCommand('copy');
+        document.body.removeChild(tmp);
+      }
+      btnCopyLink.classList.add('copied');
+      setTimeout(() => btnCopyLink.classList.remove('copied'), 1800);
+    } catch {
+      showToast('Não foi possível copiar o link automaticamente.', 'warning');
+    }
+  });
+
+  // Reações flutuantes
+  function closeReactionsPopover() {
+    reactionsPopover.hidden = true;
+    btnToggleReactions.setAttribute('aria-expanded', 'false');
+  }
+
+  btnToggleReactions.addEventListener('click', () => {
+    const willOpen = reactionsPopover.hidden;
+    reactionsPopover.hidden = !willOpen;
+    btnToggleReactions.setAttribute('aria-expanded', String(willOpen));
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!reactionsPopover.hidden
+      && !reactionsPopover.contains(event.target)
+      && event.target !== btnToggleReactions
+      && !btnToggleReactions.contains(event.target)) {
+      closeReactionsPopover();
+    }
+  });
+
+  reactionsPopover.querySelectorAll('.reaction-option').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const emoji = btn.dataset.emoji;
+      spawnFloatingReaction(emoji);
+      if (webrtc) webrtc.sendReaction(emoji);
+      closeReactionsPopover();
+    });
+  });
+
+  function spawnFloatingReaction(emoji) {
+    if (!emoji) return;
+    const el = document.createElement('span');
+    el.className = 'floating-reaction';
+    el.textContent = emoji;
+    el.style.left = `${10 + Math.random() * 75}%`;
+    reactionsLayer.appendChild(el);
+    setTimeout(() => el.remove(), 2700);
+  }
+
+  // Filtro de câmera (aplicado apenas ao seu próprio preview)
+  if (cameraFilterSelect) {
+    cameraFilterSelect.addEventListener('change', () => {
+      localVideo.classList.remove('filter-grayscale', 'filter-sepia', 'filter-cool', 'filter-warm');
+      if (cameraFilterSelect.value !== 'none') {
+        localVideo.classList.add(`filter-${cameraFilterSelect.value}`);
+      }
+    });
+  }
+
+  // Não perturbe: silencia notificações de chat durante compartilhamento de tela
+  if (toggleDnd) {
+    toggleDnd.addEventListener('change', () => {
+      dndEnabled = toggleDnd.checked;
+      showToast(dndEnabled
+        ? 'Não perturbe ativado: chat silenciado durante compartilhamento de tela.'
+        : 'Não perturbe desativado.', 'info', 2500);
+    });
+  }
+
+  // Alto contraste
+  if (toggleHighContrast) {
+    toggleHighContrast.addEventListener('change', () => {
+      document.body.classList.toggle('high-contrast', toggleHighContrast.checked);
+      try {
+        localStorage.setItem('videoconf.highContrast', toggleHighContrast.checked ? '1' : '0');
+      } catch {
+        // Ignora ambientes sem localStorage disponível
+      }
+    });
+    try {
+      if (localStorage.getItem('videoconf.highContrast') === '1') {
+        toggleHighContrast.checked = true;
+        document.body.classList.add('high-contrast');
+      }
+    } catch {
+      // Ignora ambientes sem localStorage disponível
+    }
+  }
+
+  // Atalhos de teclado
+  function openShortcutsModal() {
+    shortcutsModal.style.display = 'flex';
+  }
+
+  function closeShortcutsModal() {
+    shortcutsModal.style.display = 'none';
+  }
+
+  btnToggleShortcuts.addEventListener('click', openShortcutsModal);
+  shortcutsCloseBtn.addEventListener('click', closeShortcutsModal);
+  shortcutsModal.addEventListener('click', (event) => {
+    if (event.target === shortcutsModal) closeShortcutsModal();
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (callScreen.style.display === 'none') return;
+    const target = event.target;
+    const isTypingContext = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+
+    if (event.key === 'Escape' && shortcutsModal.style.display === 'flex') {
+      closeShortcutsModal();
+      return;
+    }
+
+    if (isTypingContext) return;
+
+    if (event.code === 'Space' && !event.repeat) {
+      event.preventDefault();
+      spaceKeyHeld = true;
+      if (webrtc && webrtc.isAudioMuted && !pushToTalkActive) {
+        pushToTalkActive = true;
+        btnToggleMic.click();
+      }
+      return;
+    }
+
+    if (event.key === 'm' || event.key === 'M') {
+      btnToggleMic.click();
+    } else if (event.key === 'v' || event.key === 'V') {
+      btnToggleCam.click();
+    } else if (event.key === 'c' || event.key === 'C') {
+      btnToggleChat.click();
+    }
+  });
+
+  document.addEventListener('keyup', (event) => {
+    if (event.code === 'Space') {
+      spaceKeyHeld = false;
+      if (pushToTalkActive) {
+        pushToTalkActive = false;
+        if (webrtc && !webrtc.isAudioMuted) {
+          btnToggleMic.click();
+        }
+      }
+    }
+  });
+
+  // Indicador de qualidade de conexão via RTCPeerConnection.getStats()
+  function setConnectionQuality(level) {
+    if (!level) {
+      connectionQuality.removeAttribute('data-quality');
+      connectionQuality.title = 'Qualidade da conexão';
+      return;
+    }
+    connectionQuality.setAttribute('data-quality', level);
+    const labels = { good: 'Conexão boa', fair: 'Conexão instável', poor: 'Conexão ruim' };
+    connectionQuality.title = labels[level] || 'Qualidade da conexão';
+  }
+
+  async function pollConnectionQuality() {
+    if (!webrtc || !webrtc.pc || typeof webrtc.pc.getStats !== 'function') return;
+    try {
+      const stats = await webrtc.pc.getStats();
+      let packetsLost = 0;
+      let packetsReceived = 0;
+      let rttSum = 0;
+      let rttCount = 0;
+
+      stats.forEach((report) => {
+        if (report.type === 'inbound-rtp' && !report.isRemote) {
+          packetsLost += report.packetsLost || 0;
+          packetsReceived += report.packetsReceived || 0;
+        }
+        if (report.type === 'candidate-pair' && report.state === 'succeeded' && typeof report.currentRoundTripTime === 'number') {
+          rttSum += report.currentRoundTripTime;
+          rttCount += 1;
+        }
+      });
+
+      const lossRatio = packetsReceived > 0 ? packetsLost / (packetsLost + packetsReceived) : 0;
+      const avgRtt = rttCount > 0 ? rttSum / rttCount : 0;
+
+      let level = 'good';
+      if (lossRatio > 0.08 || avgRtt > 0.4) {
+        level = 'poor';
+      } else if (lossRatio > 0.02 || avgRtt > 0.2) {
+        level = 'fair';
+      }
+      setConnectionQuality(level);
+    } catch {
+      // Ignora falhas pontuais na coleta de estatísticas
+    }
+  }
+
+  function startConnectionQualityMonitor() {
+    stopConnectionQualityMonitor();
+    pollConnectionQuality();
+    qualityInterval = setInterval(pollConnectionQuality, 3000);
+  }
+
+  function stopConnectionQualityMonitor() {
+    if (qualityInterval) {
+      clearInterval(qualityInterval);
+      qualityInterval = null;
+    }
   }
 
   updateFullscreenButtonState();

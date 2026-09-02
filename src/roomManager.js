@@ -1,13 +1,14 @@
 /**
  * Gerenciador de Salas e Sinalização WebRTC
  * Regras:
- * - Senha fixa para ingresso: '1015' (apenas para testes, não é autenticação de produção)
+ * - Senha de ingresso configurável via variável de ambiente ROOM_PASSWORD
+ *   (padrão '1015' caso não seja definida)
  * - Capacidade máxima estrita: exatamente 2 participantes por sala
  * - Sanitização e validação de todas as mensagens
  * - Mensagens de chat nunca são persistidas nem registradas em log
  */
 
-const REQUIRED_PASSWORD = '1015';
+const REQUIRED_PASSWORD = process.env.ROOM_PASSWORD || '1015';
 const MAX_PEERS_PER_ROOM = 2;
 const MAX_ROOM_ID_LENGTH = 32;
 const MAX_USER_NAME_LENGTH = 24;
