@@ -114,7 +114,7 @@
         </div>
 
         <div class="header-right">
-          <div class="connection-status" id="connection-status">
+          <div class="connection-status" id="connection-status" aria-live="polite">
             <span class="status-pill status-waiting" id="status-pill">Aguardando participante</span>
           </div>
         </div>
@@ -191,6 +191,37 @@
 
         <!-- Vídeo Local (Self View) -->
         <div class="video-card local-video-card" id="local-video-card">
+          <div class="pip-toolbar" aria-label="Controles do preview local">
+            <button type="button" id="btn-pip-drag" class="pip-control pip-drag-handle" aria-label="Mover preview local" title="Arraste para mover">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <path d="M5 9l-3 3 3 3"></path>
+                <path d="M9 5l3-3 3 3"></path>
+                <path d="M15 19l-3 3-3-3"></path>
+                <path d="M19 9l3 3-3 3"></path>
+                <path d="M2 12h20"></path>
+                <path d="M12 2v20"></path>
+              </svg>
+            </button>
+            <button type="button" id="btn-pip-resize" class="pip-control" aria-label="Aumentar preview local" title="Alternar tamanho do preview">
+              <svg class="icon-pip-grow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <path d="M15 3h6v6"></path>
+                <path d="M10 14L21 3"></path>
+                <path d="M9 21H3v-6"></path>
+                <path d="M14 10L3 21"></path>
+              </svg>
+              <span class="visually-hidden" id="pip-size-text">Médio</span>
+            </button>
+            <button type="button" id="btn-pip-toggle-screen" class="pip-control" aria-label="Compartilhar sua tela" title="Compartilhar sua tela">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <path d="M8 21h8"></path>
+                <path d="M12 17v4"></path>
+                <path d="M8 10l4-4 4 4"></path>
+                <path d="M12 6v8"></path>
+              </svg>
+              <span class="visually-hidden" id="pip-screen-text">Compartilhar tela</span>
+            </button>
+          </div>
           <video id="local-video" autoplay playsinline muted aria-label="Seu vídeo local"></video>
           
           <div class="video-placeholder" id="local-placeholder" style="display: none;">
@@ -228,6 +259,10 @@
 
         <div class="chat-messages" id="chat-messages" role="log" aria-live="polite" aria-relevant="additions" tabindex="0">
           <p class="chat-empty" id="chat-empty">As mensagens desta chamada não são armazenadas no servidor.</p>
+        </div>
+        <div class="typing-indicator" id="chat-typing" aria-live="polite" hidden>
+          <span></span><span></span><span></span>
+          <strong id="chat-typing-text">Participante está digitando</strong>
         </div>
 
         <form class="chat-form" id="chat-form" novalidate>

@@ -23,3 +23,42 @@ describe('WebRTCManager - controle de microfone', () => {
     assert.equal(mixedAudio.enabled, true);
   });
 });
+
+describe('WebRTCManager - metadados de UI', () => {
+  it('deve enviar estado de digitação pelo canal de metadados sem usar novos tipos WebSocket', () => {
+    const manager = new WebRTCManager({ on() {} });
+    const sent = [];
+    manager.metaChannel = {
+      readyState: 'open',
+      send(payload) {
+        sent.push(JSON.parse(payload));
+      }
+    };
+
+    manager.setTyping(true);
+    manager.setTyping(false);
+
+    assert.deepEqual(sent, [
+      { kind: 'typing', active: true },
+      { kind: 'typing', active: false }
+    ]);
+  });
+
+  it('deve emitir evento remoto quando recebe indicador de digitação', () => {
+    const manager = new WebRTCManager({ on() {} });
+    const channel = {};
+    const received = [];
+    manager.pc = {
+      createDataChannel() {
+        return channel;
+      }
+    };
+    manager.on('remote_typing', (active) => received.push(active));
+
+    manager.setupMetaChannel();
+    channel.onmessage({ data: JSON.stringify({ kind: 'typing', active: true }) });
+    channel.onmessage({ data: JSON.stringify({ kind: 'typing', active: false }) });
+
+    assert.deepEqual(received, [true, false]);
+  });
+});

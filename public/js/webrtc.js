@@ -368,6 +368,8 @@
           const data = JSON.parse(event.data);
           if (data && data.kind === 'screenshare') {
             this.emit('remote_screenshare', !!data.active);
+          } else if (data && data.kind === 'typing') {
+            this.emit('remote_typing', !!data.active);
           }
         } catch {
           // Ignora metadados inválidos
@@ -383,6 +385,10 @@
           // Ignora falhas de envio de metadados
         }
       }
+    }
+
+    setTyping(active) {
+      this.sendMeta({ kind: 'typing', active: !!active });
     }
 
     /**

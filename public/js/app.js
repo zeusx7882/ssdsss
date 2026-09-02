@@ -33,12 +33,18 @@
   const remotePlaceholderText = document.getElementById('remote-placeholder-text');
   const remoteNameLabel = document.getElementById('remote-name-label');
   const remoteScreenshareBadge = document.getElementById('remote-screenshare-badge');
+  const videoGrid = document.getElementById('video-grid');
   const localVideoCard = document.getElementById('local-video-card');
   const localVideo = document.getElementById('local-video');
   const localPlaceholder = document.getElementById('local-placeholder');
   const localNameLabel = document.getElementById('local-name-label');
   const localScreenshareBadge = document.getElementById('local-screenshare-badge');
   const localMutedBadge = document.getElementById('local-muted-badge');
+  const btnPipDrag = document.getElementById('btn-pip-drag');
+  const btnPipResize = document.getElementById('btn-pip-resize');
+  const btnPipToggleScreen = document.getElementById('btn-pip-toggle-screen');
+  const pipSizeText = document.getElementById('pip-size-text');
+  const pipScreenText = document.getElementById('pip-screen-text');
 
   // Botões de Controle
   const btnToggleMic = document.getElementById('btn-toggle-mic');
@@ -60,6 +66,8 @@
   const chatInput = document.getElementById('chat-input');
   const btnCloseChat = document.getElementById('btn-close-chat');
   const chatUnreadBadge = document.getElementById('chat-unread-badge');
+  const chatTyping = document.getElementById('chat-typing');
+  const chatTypingText = document.getElementById('chat-typing-text');
 
   // Configurações de dispositivos
   const settingsPanel = document.getElementById('settings-panel');
@@ -92,6 +100,13 @@
   const MAX_CHAT_HISTORY = 200;
   let nativeVideoFullscreen = false;
   let isSwitchingMicrophone = false;
+  let typingStopTimer = null;
+  let isLocalTyping = false;
+  const PIP_STORAGE_KEY = 'videoconf.localPreview';
+  const PIP_EDGE_SNAP = 28;
+  const PIP_PADDING = 12;
+  let pipState = loadPipState();
+  let pipDrag = null;
 
   /**
    * Exibe mensagens de notificação Toast temporárias
@@ -197,6 +212,10 @@
     callScreen.style.display = 'flex';
     displayRoomName.textContent = roomName;
     startCallTimer();
+    requestAnimationFrame(() => {
+      applyPipSize();
+      applyPipPosition();
+    });
   }
 
   /**
@@ -233,6 +252,8 @@
     remoteVideoCard.classList.remove('is-speaking');
     audioMeterFill.style.width = '0%';
     hideEnableAudioButton();
+    setRemoteTyping(false);
+    setLocalTyping(false, true);
 
     // Reseta estado dos botões
     resetControlButtons();
@@ -259,6 +280,150 @@
     screenBtnText.textContent = 'Compartilhar Tela';
     localScreenshareBadge.style.display = 'none';
     localVideoCard.classList.remove('sharing-screen');
+    updateScreenShareButtons(false);
+  }
+
+  function loadPipState() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(PIP_STORAGE_KEY) || '{}');
+      return {
+        x: Number.isFinite(saved.x) ? saved.x : null,
+        y: Number.isFinite(saved.y) ? saved.y : null,
+        size: saved.size === 'medium' ? 'medium' : 'small'
+      };
+    } catch {
+      return { x: null, y: null, size: 'small' };
+    }
+  }
+
+  function savePipState() {
+    try {
+      localStorage.setItem(PIP_STORAGE_KEY, JSON.stringify(pipState));
+    } catch {
+      // Armazenamento local indisponível; a chamada continua normalmente.
+    }
+  }
+
+  function getPipBounds(width = localVideoCard.offsetWidth, height = localVideoCard.offsetHeight) {
+    const gridRect = videoGrid.getBoundingClientRect();
+    return {
+      maxX: Math.max(PIP_PADDING, gridRect.width - width - PIP_PADDING),
+      maxY: Math.max(PIP_PADDING, gridRect.height - height - PIP_PADDING)
+    };
+  }
+
+  function clampPipPosition(x, y) {
+    const bounds = getPipBounds();
+    return {
+      x: Math.min(Math.max(PIP_PADDING, x), bounds.maxX),
+      y: Math.min(Math.max(PIP_PADDING, y), bounds.maxY)
+    };
+  }
+
+  function setPipPosition(x, y, persist = true) {
+    const next = clampPipPosition(x, y);
+    pipState.x = next.x;
+    pipState.y = next.y;
+    localVideoCard.style.left = `${next.x}px`;
+    localVideoCard.style.top = `${next.y}px`;
+    localVideoCard.style.right = 'auto';
+    localVideoCard.style.bottom = 'auto';
+    if (persist) savePipState();
+  }
+
+  function snapPipPosition() {
+    if (!Number.isFinite(pipState.x) || !Number.isFinite(pipState.y)) return;
+    const bounds = getPipBounds();
+    let { x, y } = pipState;
+    if (x - PIP_PADDING <= PIP_EDGE_SNAP) x = PIP_PADDING;
+    if (bounds.maxX - x <= PIP_EDGE_SNAP) x = bounds.maxX;
+    if (y - PIP_PADDING <= PIP_EDGE_SNAP) y = PIP_PADDING;
+    if (bounds.maxY - y <= PIP_EDGE_SNAP) y = bounds.maxY;
+    localVideoCard.classList.add('is-snapping');
+    setPipPosition(x, y);
+    window.setTimeout(() => localVideoCard.classList.remove('is-snapping'), 260);
+  }
+
+  function applyPipPosition() {
+    const gridRect = videoGrid.getBoundingClientRect();
+    if (!gridRect.width || !gridRect.height) return;
+    if (Number.isFinite(pipState.x) && Number.isFinite(pipState.y)) {
+      setPipPosition(pipState.x, pipState.y, false);
+    }
+  }
+
+  function applyPipSize() {
+    localVideoCard.classList.toggle('pip-medium', pipState.size === 'medium');
+    const nextLabel = pipState.size === 'medium' ? 'Reduzir preview local' : 'Aumentar preview local';
+    btnPipResize.setAttribute('aria-label', nextLabel);
+    btnPipResize.title = nextLabel;
+    pipSizeText.textContent = pipState.size === 'medium' ? 'Pequeno' : 'Médio';
+    applyPipPosition();
+  }
+
+  function togglePipSize() {
+    pipState.size = pipState.size === 'medium' ? 'small' : 'medium';
+    applyPipSize();
+    savePipState();
+  }
+
+  function beginPipDrag(event) {
+    if (event.button !== undefined && event.button !== 0) return;
+    const interactive = event.target.closest('button, input, select, textarea, a');
+    if (interactive && interactive !== btnPipDrag) return;
+
+    const cardRect = localVideoCard.getBoundingClientRect();
+    const gridRect = videoGrid.getBoundingClientRect();
+    pipDrag = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - cardRect.left,
+      offsetY: event.clientY - cardRect.top,
+      gridLeft: gridRect.left,
+      gridTop: gridRect.top
+    };
+    localVideoCard.classList.add('is-dragging');
+    localVideoCard.setPointerCapture(event.pointerId);
+    setPipPosition(cardRect.left - gridRect.left, cardRect.top - gridRect.top, false);
+    event.preventDefault();
+  }
+
+  function movePip(event) {
+    if (!pipDrag || event.pointerId !== pipDrag.pointerId) return;
+    const x = event.clientX - pipDrag.gridLeft - pipDrag.offsetX;
+    const y = event.clientY - pipDrag.gridTop - pipDrag.offsetY;
+    setPipPosition(x, y, false);
+    event.preventDefault();
+  }
+
+  function endPipDrag(event) {
+    if (!pipDrag || event.pointerId !== pipDrag.pointerId) return;
+    pipDrag = null;
+    localVideoCard.classList.remove('is-dragging');
+    try {
+      localVideoCard.releasePointerCapture(event.pointerId);
+    } catch {
+      // O ponteiro pode já ter sido liberado pelo navegador.
+    }
+    snapPipPosition();
+  }
+
+  function updateScreenShareButtons(isSharing) {
+    btnToggleScreen.classList.toggle('active', isSharing);
+    btnToggleScreen.setAttribute('aria-pressed', isSharing ? 'true' : 'false');
+    btnToggleScreen.setAttribute('aria-label', isSharing ? 'Parar compartilhamento de tela' : 'Compartilhar tela inteira');
+    btnToggleScreen.title = isSharing ? 'Parar seu compartilhamento de tela' : 'Compartilhar sua tela';
+    screenBtnText.textContent = isSharing ? 'Parar Tela' : 'Compartilhar Tela';
+
+    btnPipToggleScreen.classList.toggle('active', isSharing);
+    btnPipToggleScreen.setAttribute('aria-pressed', isSharing ? 'true' : 'false');
+    btnPipToggleScreen.setAttribute('aria-label', isSharing ? 'Parar compartilhamento de tela' : 'Compartilhar sua tela');
+    btnPipToggleScreen.title = isSharing ? 'Parar compartilhamento' : 'Compartilhar sua tela';
+    pipScreenText.textContent = isSharing ? 'Parar compartilhamento' : 'Compartilhar tela';
+  }
+
+  function setScreenButtonsDisabled(disabled) {
+    btnToggleScreen.disabled = disabled;
+    btnPipToggleScreen.disabled = disabled;
   }
 
   /* ==========================================================================
@@ -542,6 +707,25 @@
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
+  function setRemoteTyping(isTyping) {
+    chatTyping.hidden = !isTyping;
+    if (isTyping) {
+      chatTypingText.textContent = `${remoteUserName || 'Participante'} está digitando`;
+      scrollChatToBottom();
+    }
+  }
+
+  function setLocalTyping(isTyping, force = false) {
+    if (!force && isTyping === isLocalTyping) return;
+    isLocalTyping = isTyping;
+    if (webrtc) webrtc.setTyping(isTyping);
+  }
+
+  function scheduleTypingStop() {
+    window.clearTimeout(typingStopTimer);
+    typingStopTimer = window.setTimeout(() => setLocalTyping(false), 1800);
+  }
+
   function trimChatHistory() {
     const items = chatMessages.querySelectorAll('.chat-message');
     if (items.length > MAX_CHAT_HISTORY) {
@@ -618,6 +802,8 @@
 
   chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
+    setLocalTyping(false);
+    window.clearTimeout(typingStopTimer);
 
     const text = Utils.sanitizeChatText(chatInput.value);
     if (!text) {
@@ -656,6 +842,15 @@
 
     chatInput.value = '';
     chatInput.focus();
+  });
+
+  chatInput.addEventListener('input', () => {
+    if (!hasRemotePeer || !Utils.sanitizeChatText(chatInput.value)) {
+      setLocalTyping(false);
+      return;
+    }
+    setLocalTyping(true);
+    scheduleTypingStop();
   });
 
   btnToggleChat.addEventListener('click', () => {
@@ -791,6 +986,7 @@
       remotePlaceholder.style.display = 'flex';
       remotePlaceholderText.textContent = `${who} saiu da chamada.`;
       setRemoteScreenshare(false);
+      setRemoteTyping(false);
       setRemoteName(null);
       hideEnableAudioButton();
       exitFullscreen();
@@ -901,6 +1097,10 @@
       setRemoteScreenshare(isSharing);
     });
 
+    webrtc.on('remote_typing', (isTyping) => {
+      setRemoteTyping(isTyping);
+    });
+
     webrtc.on('connection_state_change', (state) => {
       if (state === 'connected') {
         updateConnectionStatus('Conectado', 'status-connected');
@@ -942,10 +1142,7 @@
     });
 
     webrtc.on('screenshare_started', (stream) => {
-      btnToggleScreen.classList.add('active');
-      btnToggleScreen.setAttribute('aria-pressed', 'true');
-      btnToggleScreen.setAttribute('aria-label', 'Parar compartilhamento de tela');
-      screenBtnText.textContent = 'Parar Tela';
+      updateScreenShareButtons(true);
       localScreenshareBadge.style.display = 'inline-block';
       localVideoCard.classList.add('sharing-screen');
       localVideo.srcObject = stream;
@@ -955,10 +1152,7 @@
     });
 
     webrtc.on('screenshare_stopped', (cameraStream) => {
-      btnToggleScreen.classList.remove('active');
-      btnToggleScreen.setAttribute('aria-pressed', 'false');
-      btnToggleScreen.setAttribute('aria-label', 'Compartilhar tela inteira');
-      screenBtnText.textContent = 'Compartilhar Tela';
+      updateScreenShareButtons(false);
       localScreenshareBadge.style.display = 'none';
       localVideoCard.classList.remove('sharing-screen');
       localVideo.srcObject = cameraStream || null;
@@ -1029,21 +1223,50 @@
     }
   });
 
-  btnToggleScreen.addEventListener('click', async () => {
+  async function toggleScreenShareFromControl() {
     if (!webrtc) return;
     if (!Utils.isDisplayMediaSupported()) {
       showToast('Compartilhamento de tela não suportado neste navegador.', 'error');
       return;
     }
-    btnToggleScreen.disabled = true;
+    setScreenButtonsDisabled(true);
     try {
       await webrtc.toggleScreenShare();
     } catch (err) {
       console.error('Erro ao compartilhar tela:', err);
       showToast(err.message || 'Falha ao iniciar compartilhamento de tela.', 'error');
     } finally {
-      btnToggleScreen.disabled = false;
+      setScreenButtonsDisabled(false);
     }
+  }
+
+  btnToggleScreen.addEventListener('click', toggleScreenShareFromControl);
+  btnPipToggleScreen.addEventListener('click', toggleScreenShareFromControl);
+  btnPipResize.addEventListener('click', togglePipSize);
+  localVideoCard.addEventListener('pointerdown', beginPipDrag);
+  localVideoCard.addEventListener('pointermove', movePip);
+  localVideoCard.addEventListener('pointerup', endPipDrag);
+  localVideoCard.addEventListener('pointercancel', endPipDrag);
+  btnPipDrag.addEventListener('keydown', (event) => {
+    const step = event.shiftKey ? 32 : 12;
+    const keys = {
+      ArrowLeft: [-step, 0],
+      ArrowRight: [step, 0],
+      ArrowUp: [0, -step],
+      ArrowDown: [0, step]
+    };
+    const delta = keys[event.key];
+    if (!delta) return;
+    const cardRect = localVideoCard.getBoundingClientRect();
+    const gridRect = videoGrid.getBoundingClientRect();
+    const currentX = Number.isFinite(pipState.x) ? pipState.x : cardRect.left - gridRect.left;
+    const currentY = Number.isFinite(pipState.y) ? pipState.y : cardRect.top - gridRect.top;
+    setPipPosition(currentX + delta[0], currentY + delta[1]);
+    event.preventDefault();
+  });
+  window.addEventListener('resize', () => {
+    applyPipSize();
+    applyPipPosition();
   });
 
   btnEndCall.addEventListener('click', () => {
@@ -1069,4 +1292,6 @@
   }
 
   updateFullscreenButtonState();
+  applyPipSize();
+  updateScreenShareButtons(false);
 })();
