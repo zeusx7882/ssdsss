@@ -114,6 +114,16 @@
         </div>
 
         <div class="header-right">
+          <button type="button" id="btn-copy-link" class="icon-btn" aria-label="Copiar link da sala" title="Copiar link da sala">
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+            </svg>
+            <span class="copy-feedback" id="copy-link-feedback" aria-hidden="true">Copiado!</span>
+          </button>
+          <div class="connection-quality" id="connection-quality" title="Qualidade da conexão" aria-live="polite">
+            <span class="quality-bar"></span><span class="quality-bar"></span><span class="quality-bar"></span><span class="quality-bar"></span>
+          </div>
           <div class="connection-status" id="connection-status" aria-live="polite">
             <span class="status-pill status-waiting" id="status-pill">Aguardando participante</span>
           </div>
@@ -245,6 +255,8 @@
 
       </section>
 
+      <!-- Contêiner para reações flutuantes -->
+      <div id="reactions-layer" class="reactions-layer" aria-hidden="true"></div>
       <!-- Painel de Chat -->
       <aside class="chat-panel" id="chat-panel" aria-label="Chat da chamada" hidden>
         <div class="chat-header">
@@ -314,6 +326,31 @@
           </div>
           <button type="button" id="btn-refresh-devices" class="btn btn-secondary btn-block">Atualizar dispositivos</button>
           <p class="privacy-note">O áudio é analisado somente neste dispositivo e nunca é gravado.</p>
+
+          <div class="settings-divider" role="separator"></div>
+
+          <div class="device-field">
+            <label for="camera-filter-select">Filtro de câmera (seu preview)</label>
+            <select id="camera-filter-select">
+              <option value="none">Nenhum</option>
+              <option value="grayscale">Preto e branco</option>
+              <option value="sepia">Sépia</option>
+              <option value="cool">Frio</option>
+              <option value="warm">Vintage</option>
+            </select>
+          </div>
+
+          <label class="toggle-field" for="toggle-dnd">
+            <span>Não perturbe (silenciar chat ao compartilhar tela)</span>
+            <input type="checkbox" id="toggle-dnd">
+            <span class="toggle-switch" aria-hidden="true"></span>
+          </label>
+
+          <label class="toggle-field" for="toggle-high-contrast">
+            <span>Alto contraste (acessibilidade)</span>
+            <input type="checkbox" id="toggle-high-contrast">
+            <span class="toggle-switch" aria-hidden="true"></span>
+          </label>
         </div>
       </aside>
       </div>
@@ -384,6 +421,34 @@
           <span class="btn-text" id="screen-btn-text">Compartilhar Tela</span>
         </button>
 
+        <div class="reactions-wrapper">
+          <button
+            type="button"
+            id="btn-toggle-reactions"
+            class="control-btn"
+            aria-label="Enviar reação"
+            aria-haspopup="true"
+            aria-expanded="false"
+            aria-controls="reactions-popover"
+            title="Reações"
+          >
+            <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M8 14s1.5 2 4 2 4-2 4-2"></path>
+              <line x1="9" y1="9" x2="9.01" y2="9"></line>
+              <line x1="15" y1="9" x2="15.01" y2="9"></line>
+            </svg>
+            <span class="btn-text">Reagir</span>
+          </button>
+          <div class="reactions-popover" id="reactions-popover" role="menu" aria-label="Escolha uma reação" hidden>
+            <button type="button" class="reaction-option" data-emoji="👍" role="menuitem" aria-label="Reagir com joinha">👍</button>
+            <button type="button" class="reaction-option" data-emoji="❤️" role="menuitem" aria-label="Reagir com coração">❤️</button>
+            <button type="button" class="reaction-option" data-emoji="😂" role="menuitem" aria-label="Reagir com risada">😂</button>
+            <button type="button" class="reaction-option" data-emoji="😮" role="menuitem" aria-label="Reagir com surpresa">😮</button>
+            <button type="button" class="reaction-option" data-emoji="🎉" role="menuitem" aria-label="Reagir com festa">🎉</button>
+          </div>
+        </div>
+
         <button
           type="button"
           id="btn-toggle-chat"
@@ -420,6 +485,21 @@
 
         <button
           type="button"
+          id="btn-toggle-shortcuts"
+          class="control-btn"
+          aria-label="Ver atalhos de teclado"
+          aria-haspopup="dialog"
+          title="Atalhos de teclado"
+        >
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="5" width="20" height="14" rx="2" ry="2"></rect>
+            <path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M9 13h6"></path>
+          </svg>
+          <span class="btn-text">Atalhos</span>
+        </button>
+
+        <button
+          type="button"
           id="btn-end-call"
           class="control-btn btn-danger"
           aria-label="Encerrar chamada"
@@ -452,6 +532,22 @@
         <p id="modal-message" class="modal-message"></p>
         <div class="modal-actions">
           <button type="button" id="modal-close-btn" class="btn btn-primary">Voltar para o Início</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Modal de Atalhos de Teclado -->
+    <div id="shortcuts-modal" class="modal-backdrop" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+      <div class="modal-card">
+        <h2 id="shortcuts-title" class="modal-title">Atalhos de teclado</h2>
+        <ul class="shortcuts-list">
+          <li><kbd>Espaço</kbd> (segurar) — falar temporariamente enquanto mutado</li>
+          <li><kbd>M</kbd> — mutar/ativar microfone</li>
+          <li><kbd>V</kbd> — ligar/desligar câmera</li>
+          <li><kbd>C</kbd> — abrir/fechar chat</li>
+        </ul>
+        <div class="modal-actions">
+          <button type="button" id="shortcuts-close-btn" class="btn btn-primary">Entendi</button>
         </div>
       </div>
     </div>

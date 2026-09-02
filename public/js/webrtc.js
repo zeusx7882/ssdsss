@@ -370,6 +370,8 @@
             this.emit('remote_screenshare', !!data.active);
           } else if (data && data.kind === 'typing') {
             this.emit('remote_typing', !!data.active);
+          } else if (data && data.kind === 'reaction' && typeof data.emoji === 'string') {
+            this.emit('remote_reaction', data.emoji.slice(0, 8));
           }
         } catch {
           // Ignora metadados inválidos
@@ -389,6 +391,11 @@
 
     setTyping(active) {
       this.sendMeta({ kind: 'typing', active: !!active });
+    }
+
+    sendReaction(emoji) {
+      if (typeof emoji !== 'string' || !emoji) return;
+      this.sendMeta({ kind: 'reaction', emoji: emoji.slice(0, 8) });
     }
 
     /**

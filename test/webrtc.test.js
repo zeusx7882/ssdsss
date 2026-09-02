@@ -61,4 +61,38 @@ describe('WebRTCManager - metadados de UI', () => {
 
     assert.deepEqual(received, [true, false]);
   });
+
+  it('deve enviar reações pelo canal de metadados sem usar novos tipos WebSocket', () => {
+    const manager = new WebRTCManager({ on() {} });
+    const sent = [];
+    manager.metaChannel = {
+      readyState: 'open',
+      send(payload) {
+        sent.push(JSON.parse(payload));
+      }
+    };
+
+    manager.sendReaction('👍');
+    manager.sendReaction('');
+
+    assert.deepEqual(sent, [{ kind: 'reaction', emoji: '👍' }]);
+  });
+
+  it('deve emitir evento remoto quando recebe uma reação', () => {
+    const manager = new WebRTCManager({ on() {} });
+    const channel = {};
+    const received = [];
+    manager.pc = {
+      createDataChannel() {
+        return channel;
+      }
+    };
+    manager.on('remote_reaction', (emoji) => received.push(emoji));
+
+    manager.setupMetaChannel();
+    channel.onmessage({ data: JSON.stringify({ kind: 'reaction', emoji: '🎉' }) });
+    channel.onmessage({ data: JSON.stringify({ kind: 'reaction', emoji: 12345 }) });
+
+    assert.deepEqual(received, ['🎉']);
+  });
 });
